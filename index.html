@@ -322,20 +322,38 @@ scene.add(trackGroup);
 
 const TRACK_HEIGHT = 0.003; // ~3mm rail height off the floor
 
+// The two end turns are genuine constant-radius semicircles (like a real
+// stadium-shaped oval's end caps), not sparse hand-placed corner points —
+// a spline forced through only 1-2 points at a sharp direction reversal
+// produces an uneven, pointy "V" with wildly swinging tangents, which is
+// what made the train snap/spin unrealistically at each end instead of
+// arcing round smoothly. Radius is kept small (0.25m) because both ends
+// have limited clearance to the wall once the lane separation is added
+// (0.555m at the south/doorway end, 0.79m at the north end).
+const TURN_RADIUS = 0.25; // metres
+const TURN_SEGS = 24;
+
+function arcPoints(cx, cz, radius, fromDeg, toDeg, segs) {
+  const pts = [];
+  for (let i = 0; i <= segs; i++) {
+    const a = THREE.MathUtils.degToRad(fromDeg + ((toDeg - fromDeg) * i) / segs);
+    pts.push([cx + radius * Math.cos(a), cz + radius * Math.sin(a)]);
+  }
+  return pts;
+}
+
+// South turn: in the open doorway foyer, bulging toward the entrance
+// (apex at +z, away from the room) between the kitchen-neck exit and the
+// doorway-cupboard-run entrance.
+const southArc = arcPoints(1.00, 4.15, TURN_RADIUS, 180, 0, TURN_SEGS); // west conn -> apex(+z) -> east conn
+
+// North turn: in the open band below the north wall, bulging toward the
+// wall (apex at -z, away from the room) between the sofa-run exit and the
+// left-wall-cupboard entrance.
+const northArc = arcPoints(-0.25, -4.15, TURN_RADIUS, 0, -180, TURN_SEGS); // east conn -> apex(-z) -> west conn
+
 const TRACK_WAYPOINTS = [
-  // -- west lane, south-bound, clear of the left-wall cupboard then the kitchen --
-  [-1.35, -3.90], // north turn, west end
-  [-1.35, -2.20], // clear of left-wall cupboard
-  [-1.10, -1.40], // through the sofa-chaise neck (paired with the east lane at the same z)
-  [-1.10, -0.30], // past the chaise, cupboard still clearing to the west
-  [-0.30,  0.30], // crossing the fully-open band in front of the doorway gap
-  [ 0.65,  0.90], // entering the kitchen/doorway-cupboard neck
-  [ 0.65,  2.00],
-  [ 0.65,  3.00], // bathroom wall now on the west side, not furniture
-  [ 0.65,  3.90], // exiting the neck into the doorway foyer
-  // -- south turn, in the open doorway foyer near the entrance corner --
-  [ 0.90,  4.15],
-  [ 1.60,  4.20], // apex closest to the doorway corner — ready to extend later
+  ...southArc, // west conn (0.75, 4.15) -> apex (1.00, 4.40) -> east conn (1.25, 4.15)
   // -- east lane, north-bound, clear of the doorway cupboards then the sofa --
   [ 1.35,  3.90],
   [ 1.35,  3.00],
@@ -346,9 +364,19 @@ const TRACK_WAYPOINTS = [
   [-0.10, -1.40], // through the sofa-chaise neck (paired with the west lane)
   [ 0.70, -2.30], // clear of the sofa (main piece)'s west edge
   [ 0.90, -3.30],
-  [ 0.85, -3.90], // north turn, east end
-  // -- north turn, in the open band below the north wall --
-  [-0.30, -4.15],
+  [ 0.20, -3.70], // funnelling in to the north turn's narrower gauge
+  ...northArc, // east conn (0.00, -4.15) -> apex (-0.25, -4.40) -> west conn (-0.50, -4.15)
+  // -- west lane, south-bound, clear of the left-wall cupboard then the kitchen --
+  [-0.50, -3.70], // funnelling out from the north turn
+  [-1.10, -3.20],
+  [-1.35, -2.20], // clear of left-wall cupboard
+  [-1.10, -1.40], // through the sofa-chaise neck (paired with the east lane at the same z)
+  [-1.10, -0.30], // past the chaise, cupboard still clearing to the west
+  [-0.30,  0.30], // crossing the fully-open band in front of the doorway gap
+  [ 0.65,  0.90], // entering the kitchen/doorway-cupboard neck
+  [ 0.65,  2.00],
+  [ 0.65,  3.00], // bathroom wall now on the west side, not furniture
+  [ 0.65,  3.90], // exiting the neck into the doorway foyer, feeding back into the south turn
 ];
 
 const centreline = TRACK_WAYPOINTS.map(([x, z]) => new THREE.Vector3(x, TRACK_HEIGHT, z));
@@ -390,27 +418,108 @@ for (let i = 0; i < SLEEPER_COUNT; i++) {
   trackGroup.add(sleeper);
 }
 
-// ---------- Train: tank engine + two coaches (simplified placeholder shapes) ----------
+// ---------- Train: tank engine + two coaches ----------
 // Long axis of every vehicle runs along local Z, because Object3D.lookAt()
 // (used in placeAt() below) faces an object's -Z axis at its target.
+// Wheels/buffers/chimney are added for recognisable silhouette; axle
+// gauge, body footprint and coupling offsets are unchanged from the
+// original placeholder boxes.
+const wheelMat = new THREE.MeshStandardMaterial({ color: 0x151515, metalness: 0.4, roughness: 0.6 });
+const WHEEL_R = 0.0075;
+
+function addWheelPair(g, z) {
+  for (const side of [-1, 1]) {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.004, 12), wheelMat);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(side * (GAUGE / 2 + 0.002), WHEEL_R, z);
+    wheel.castShadow = true;
+    g.add(wheel);
+  }
+}
+
 function makeLoco() {
   const g = new THREE.Group();
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1f3b57, metalness: 0.3, roughness: 0.5 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.045, 0.11), bodyMat);
-  body.position.y = 0.0225;
-  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.04, 0.035), bodyMat);
-  cab.position.set(0, 0.045, -0.03);
-  g.add(body, cab);
+  const detailMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, metalness: 0.5, roughness: 0.4 });
+
+  // Boiler: a horizontal cylinder, the classic tank-engine barrel shape.
+  const boiler = new THREE.Mesh(new THREE.CylinderGeometry(0.0135, 0.0135, 0.075, 14), bodyMat);
+  boiler.rotation.x = Math.PI / 2;
+  boiler.position.set(0, 0.0225, 0.01);
+  g.add(boiler);
+
+  // Footplate/tanks: a flat base the boiler and cab sit on.
+  const footplate = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.006, 0.105), bodyMat);
+  footplate.position.set(0, 0.012, 0);
+  g.add(footplate);
+
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.027, 0.04, 0.032), bodyMat);
+  cab.position.set(0, 0.045, -0.034);
+  g.add(cab);
+
+  const chimney = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.004, 0.018, 10), detailMat);
+  chimney.position.set(0, 0.0525, 0.034);
+  g.add(chimney);
+
+  const dome = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.006, 0.01, 10), detailMat);
+  dome.position.set(0, 0.0375, 0.006);
+  g.add(dome);
+
+  const buffer = new THREE.CylinderGeometry(0.0025, 0.0025, 0.012, 8);
+  for (const side of [-1, 1]) {
+    const b = new THREE.Mesh(buffer, detailMat);
+    b.rotation.x = Math.PI / 2;
+    b.position.set(side * 0.011, 0.018, 0.058);
+    g.add(b);
+  }
+
+  addWheelPair(g, 0.032);
+  addWheelPair(g, -0.028);
+
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return g;
 }
 
 function makeCoach() {
-  const mat = new THREE.MeshStandardMaterial({ color: 0x7a2e2e, roughness: 0.6 });
-  const coach = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.04, 0.13), mat);
-  coach.position.y = 0.02;
-  coach.castShadow = true;
-  return coach;
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x7a2e2e, roughness: 0.6 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x5c5c5c, roughness: 0.7 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0xbfd4de, roughness: 0.3, metalness: 0.2 });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.03, 0.13), bodyMat);
+  body.position.y = 0.024;
+  g.add(body);
+
+  // Window strip: a thin lighter band let into the body side, rather than
+  // a plain solid box, so the coach reads as passenger stock.
+  const windows = new THREE.Mesh(new THREE.BoxGeometry(0.0265, 0.012, 0.11), glassMat);
+  windows.position.y = 0.03;
+  g.add(windows);
+
+  // Roof: a half-cylinder laid along the coach's length.
+  const roofGeo = new THREE.CylinderGeometry(0.014, 0.014, 0.13, 12, 1, false, 0, Math.PI);
+  const roof = new THREE.Mesh(roofGeo, roofMat);
+  roof.rotation.z = Math.PI / 2;
+  roof.rotation.y = Math.PI / 2;
+  roof.position.y = 0.039;
+  g.add(roof);
+
+  const buffer = new THREE.CylinderGeometry(0.0025, 0.0025, 0.012, 8);
+  const bufferMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, metalness: 0.5, roughness: 0.4 });
+  for (const zEnd of [0.065, -0.065]) {
+    for (const side of [-1, 1]) {
+      const b = new THREE.Mesh(buffer, bufferMat);
+      b.rotation.x = Math.PI / 2;
+      b.position.set(side * 0.011, 0.012, zEnd + (zEnd > 0 ? 0.006 : -0.006));
+      g.add(b);
+    }
+  }
+
+  addWheelPair(g, 0.045);
+  addWheelPair(g, -0.045);
+
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
 }
 
 const loco = makeLoco();
