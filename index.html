@@ -198,7 +198,6 @@ const UNIT_DEPTH = 0.6;      // standard worktop depth
 const WORKTOP_H = 0.9;       // standard worktop height
 const TALL_UNIT_H = 2.0;     // fridge / larder height
 const SOFA_H = 0.8;          // ASSUMPTION — typical sofa back height, not measured
-const TABLE_H = 0.75;        // ASSUMPTION — typical table height, not measured
 
 // Room corners, named as in NOTES.md (x, z):
 const A = { x: -2.185, z: -4.455 }; // top-left (back-left of whole room)
@@ -263,18 +262,6 @@ addBlock(
   (E.x + F.x) / 2, WORKTOP_H / 2, F.z - UNIT_DEPTH / 2
 );
 
-// --- Table: 125 x 75cm, 100cm clear from the left-wall cupboard
-// (confirmed directly: "the right cupboard ... 100 from table"),
-// centred on the cupboard's length.
-const cupboardInnerX = A.x + UNIT_DEPTH;
-const tableW = 0.75, tableLen = 1.25;
-const tableNearX = cupboardInnerX + 1.0;
-addBlock(
-  furnitureGroup, tableMat,
-  tableW, TABLE_H, tableLen,
-  tableNearX + tableW / 2, TABLE_H / 2, (cupboardStartZ + cupboardEndZ) / 2
-);
-
 // --- Doorway-side cupboard/freezer/cupboard run, against the B-C wall ---
 // (the 891cm doorway->sofa wall). Sequence confirmed by direct sum in
 // NOTES.md: 100 clear (doorway) + 84 + 103 + 84 + 170 clear + 300 (sofa)
@@ -297,10 +284,10 @@ addWallUnit(kitchenGroup, unitMat, 0.84, UNIT_DEPTH, WORKTOP_H);       // cupboa
 cz -= 1.70; // 170cm clear gap before the sofa
 
 // --- L-shaped sofa, 300cm total along the wall ---
-// Main piece (210 x 108) nearest the cupboards, chaise (195 x 90,
-// projecting further into the room) continuing toward B.
-addWallUnit(furnitureGroup, sofaMat, 2.10, 1.08, SOFA_H);  // main piece
+// Chaise (90 x 195, projecting further into the room) nearest the
+// cupboards, main piece (210 x 108) continuing toward B/the bookcase.
 addWallUnit(furnitureGroup, sofaMat, 0.90, 1.95, SOFA_H);  // chaise, projects deeper into the room
+addWallUnit(furnitureGroup, sofaMat, 2.10, 1.08, SOFA_H);  // main piece
 
 // --- Bookcase: 120 x 35cm, at right angles to the sofa in the top-right
 // corner (where the right wall meets the top wall), flush against the
