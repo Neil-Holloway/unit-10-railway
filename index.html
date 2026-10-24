@@ -92,7 +92,34 @@ renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
 const childCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 50);
-const birdCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 50);
+
+// Bird's-eye is a true top-down architectural plan, not a perspective shot —
+// an orthographic camera avoids any perspective tilt/skew showing wall or
+// unit side-faces that shouldn't be visible from directly overhead.
+// Fit the whole room into the frustum with margin, on whichever axis is the
+// binding constraint for the current window shape — a fixed world-height
+// half-extent (the old approach) left almost no horizontal margin on
+// square/portrait windows, making the view look zoomed into one corner.
+const BIRD_VIEW_MARGIN = 1.15; // 15% padding around the room on all sides
+const birdCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 50);
+function updateBirdFrustum() {
+  const aspect = window.innerWidth / window.innerHeight;
+  const neededHalfX = (ROOM_W / 2) * BIRD_VIEW_MARGIN;
+  const neededHalfZ = (ROOM_D / 2) * BIRD_VIEW_MARGIN;
+  let halfZ = neededHalfZ;
+  let halfX = halfZ * aspect;
+  if (halfX < neededHalfX) {
+    halfX = neededHalfX;
+    halfZ = halfX / aspect;
+  }
+  birdCamera.left = -halfX;
+  birdCamera.right = halfX;
+  birdCamera.top = halfZ;
+  birdCamera.bottom = -halfZ;
+  birdCamera.updateProjectionMatrix();
+}
+updateBirdFrustum();
+
 let activeCamera = childCamera;
 
 // ---------- Lighting ----------
@@ -275,13 +302,15 @@ for (let i = 0; i < SLEEPER_COUNT; i++) {
 }
 
 // ---------- Train: tank engine + two coaches (simplified placeholder shapes) ----------
+// Long axis of every vehicle runs along local Z, because Object3D.lookAt()
+// (used in placeAt() below) faces an object's -Z axis at its target.
 function makeLoco() {
   const g = new THREE.Group();
   const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1f3b57, metalness: 0.3, roughness: 0.5 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.045, 0.028), bodyMat);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.045, 0.11), bodyMat);
   body.position.y = 0.0225;
-  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.026), bodyMat);
-  cab.position.set(-0.03, 0.045, 0);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.04, 0.035), bodyMat);
+  cab.position.set(0, 0.045, -0.03);
   g.add(body, cab);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return g;
@@ -289,7 +318,7 @@ function makeLoco() {
 
 function makeCoach() {
   const mat = new THREE.MeshStandardMaterial({ color: 0x7a2e2e, roughness: 0.6 });
-  const coach = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.04, 0.026), mat);
+  const coach = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.04, 0.13), mat);
   coach.position.y = 0.02;
   coach.castShadow = true;
   return coach;
@@ -299,6 +328,25 @@ const loco = makeLoco();
 const coach1 = makeCoach();
 const coach2 = makeCoach();
 trackGroup.add(loco, coach1, coach2);
+
+// Thin coupling rods so the three vehicles read as one connected train
+// rather than three separate floating blocks.
+const couplingMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+function makeCoupling() {
+  return new THREE.Mesh(new THREE.CylinderGeometry(0.0025, 0.0025, 1, 6), couplingMat);
+}
+const coupling1 = makeCoupling();
+const coupling2 = makeCoupling();
+trackGroup.add(coupling1, coupling2);
+
+const UP = new THREE.Vector3(0, 1, 0);
+function alignCoupling(mesh, posA, posB) {
+  const dir = new THREE.Vector3().subVectors(posB, posA);
+  const len = dir.length();
+  mesh.position.copy(posA).addScaledVector(dir, 0.5);
+  mesh.scale.set(1, len, 1);
+  mesh.quaternion.setFromUnitVectors(UP, dir.normalize());
+}
 
 // ---------- Train motion ----------
 let scaleMph = 25;
@@ -331,11 +379,15 @@ function updateTrain(dt) {
   placeAt(loco, trainT);
   placeAt(coach1, trainT - tOffset(0.17));
   placeAt(coach2, trainT - tOffset(0.34));
+  alignCoupling(coupling1, loco.position, coach1.position);
+  alignCoupling(coupling2, coach1.position, coach2.position);
 }
 
 // ---------- Cameras ----------
 // Child's-eye: orbits the track, height clamped to 30-50cm off the floor.
-childCamera.position.set(trackGroup.position.x + 1.0, 0.4, trackGroup.position.z + 1.0);
+// Offset chosen to sit inside the open floor strip beside the track,
+// clear of the right wall and the kitchen peninsula.
+childCamera.position.set(trackGroup.position.x + 0.5, 0.4, trackGroup.position.z + 1.3);
 const childControls = new OrbitControls(childCamera, renderer.domElement);
 childControls.target.set(trackGroup.position.x, 0.1, trackGroup.position.z);
 childControls.minDistance = 0.3;
@@ -346,14 +398,17 @@ childControls.addEventListener('change', () => {
   childCamera.position.y = Math.min(0.5, Math.max(0.3, childCamera.position.y));
 });
 
-// Bird's-eye: top-down plan view of the living room.
-birdCamera.position.set(0, 6, 0.001);
+// Bird's-eye: locked top-down plan view of the living room. Rotation is
+// disabled entirely (orthographic + no tilt) so this always reads as a
+// flat plan, not a perspective shot; pan and zoom still work.
+birdCamera.position.set(0, 10, 0);
+birdCamera.up.set(0, 0, -1); // avoid an undefined up-vector when looking straight down
 birdCamera.lookAt(0, 0, 0);
 const birdControls = new OrbitControls(birdCamera, renderer.domElement);
 birdControls.target.set(0, 0, 0);
-birdControls.maxPolarAngle = 0.1;
-birdControls.minDistance = 2;
-birdControls.maxDistance = 12;
+birdControls.enableRotate = false;
+birdControls.minZoom = 0.4;
+birdControls.maxZoom = 4;
 birdControls.update();
 
 // ---------- UI ----------
@@ -386,10 +441,9 @@ speedSlider.addEventListener('input', () => {
 // ---------- Resize ----------
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
-  [childCamera, birdCamera].forEach((cam) => {
-    cam.aspect = window.innerWidth / window.innerHeight;
-    cam.updateProjectionMatrix();
-  });
+  childCamera.aspect = window.innerWidth / window.innerHeight;
+  childCamera.updateProjectionMatrix();
+  updateBirdFrustum();
 });
 
 // ---------- Animate ----------
