@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Unit 10 Railway</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe6ec; }
+  canvas { display: block; }
+  #ui {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    font-family: system-ui, sans-serif;
+    font-size: 14px;
+    color: #fff;
+    background: rgba(20, 24, 28, 0.6);
+    backdrop-filter: blur(4px);
+    padding: 10px 14px;
+    border-radius: 10px;
+    line-height: 1.6;
+  }
+  #ui button {
+    margin-right: 6px;
+    padding: 5px 12px;
+    border: none;
+    border-radius: 6px;
+    background: #2f4a63;
+    color: #fff;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  #ui button.active { background: #4d7ea8; }
+  #ui input[type="range"] { vertical-align: middle; width: 140px; }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div>
+    <button id="viewChild" class="active">Child's-eye view</button>
+    <button id="viewBird">Bird's-eye view</button>
+  </div>
+  <div style="margin-top: 8px;">
+    <button id="toggleRun">Pause</button>
+    Speed: <span id="speedLabel">25</span> scale mph
+    <input id="speedSlider" type="range" min="0" max="60" value="25" />
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ----------------------------------------------------------------------
+   Unit 10 Railway — scaffold
+   Flat and room are built at real (measured) scale: 1 three.js unit = 1 metre.
+   The track and train are modelled at OO gauge, 1:76 — a real model railway
+   laid on the floor of a real room, not a shrunk-down room.
+   Measurements are from NOTES.md (the project brief).
+------------------------------------------------------------------------- */
+
+// ---------- Unit 10: living room / kitchen (measured) ----------
+const ROOM_W = 7.74;      // metres — along the long wall
+const ROOM_D = 4.44;      // metres
+const CEILING_H = 2.28;   // metres
+
+// ---------- OO gauge track ----------
+const TRACK_RADIUS = 0.75;  // metres — curve radius at each end of the oval
+const STRAIGHT_LEN = 2.4;   // metres — length of each straight section
+const GAUGE = 0.0165;       // metres — 16.5mm, OO gauge
+const SCALE = 76;           // 1:76
+
+// ---------- Renderer / scene ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdfe6ec);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const childCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 50);
+const birdCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 50);
+let activeCamera = childCamera;
+
+// ---------- Lighting ----------
+scene.add(new THREE.HemisphereLight(0xffffff, 0x55606a, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+sun.position.set(3, 4, 2);
+sun.castShadow = true;
+scene.add(sun);
+
+// ---------- Room shell: floor + four walls ----------
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(ROOM_W, ROOM_D),
+  new THREE.MeshStandardMaterial({ color: 0xb79c7a, roughness: 0.9 }) // placeholder wood finish
+);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xf2efe9, roughness: 0.95, side: THREE.DoubleSide });
+function makeWall(length) {
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(length, CEILING_H), wallMat);
+  wall.receiveShadow = true;
+  return wall;
+}
+
+const wallBack = makeWall(ROOM_W);
+wallBack.position.set(0, CEILING_H / 2, -ROOM_D / 2);
+scene.add(wallBack);
+
+const wallFront = makeWall(ROOM_W);
+wallFront.position.set(0, CEILING_H / 2, ROOM_D / 2);
+wallFront.rotation.y = Math.PI;
+scene.add(wallFront);
+
+const wallLeft = makeWall(ROOM_D);
+wallLeft.position.set(-ROOM_W / 2, CEILING_H / 2, 0);
+wallLeft.rotation.y = Math.PI / 2;
+scene.add(wallLeft);
+
+const wallRight = makeWall(ROOM_D);
+wallRight.position.set(ROOM_W / 2, CEILING_H / 2, 0);
+wallRight.rotation.y = -Math.PI / 2;
+scene.add(wallRight);
+
+// ---------- Track: one oval (stadium shape — two straights + two semicircles) ----------
+const trackGroup = new THREE.Group();
+// Placeholder position: clear of walls, in the open floor. Will move once
+// real furniture layout is known (see NOTES.md "Still needed").
+trackGroup.position.set(0, 0, 0.2);
+scene.add(trackGroup);
+
+const TRACK_HEIGHT = 0.003; // ~3mm rail height off the floor
+
+function stadiumCenterline(halfStraight, radius, archSegs = 48) {
+  const pts = [];
+  pts.push(new THREE.Vector3(-halfStraight, TRACK_HEIGHT, -radius));
+  pts.push(new THREE.Vector3(halfStraight, TRACK_HEIGHT, -radius));
+  for (let i = 1; i <= archSegs; i++) {
+    const a = -Math.PI / 2 + (Math.PI * i) / archSegs;
+    pts.push(new THREE.Vector3(halfStraight + radius * Math.cos(a), TRACK_HEIGHT, radius * Math.sin(a)));
+  }
+  pts.push(new THREE.Vector3(-halfStraight, TRACK_HEIGHT, radius));
+  for (let i = 1; i <= archSegs; i++) {
+    const a = Math.PI / 2 + (Math.PI * i) / archSegs;
+    pts.push(new THREE.Vector3(-halfStraight + radius * Math.cos(a), TRACK_HEIGHT, radius * Math.sin(a)));
+  }
+  pts.pop(); // drop duplicate closing point; curve is closed=true below
+  return pts;
+}
+
+const centreline = stadiumCenterline(STRAIGHT_LEN / 2, TRACK_RADIUS);
+const curve = new THREE.CatmullRomCurve3(centreline, true, 'catmullrom', 0.0);
+const trackLength = curve.getLength();
+
+function buildRail(offset) {
+  const divisions = 400;
+  const pts = [];
+  for (let i = 0; i <= divisions; i++) {
+    const t = i / divisions;
+    const p = curve.getPointAt(t);
+    const tangent = curve.getTangentAt(t);
+    const side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
+    pts.push(p.clone().addScaledVector(side, offset));
+  }
+  const railCurve = new THREE.CatmullRomCurve3(pts, true);
+  return new THREE.TubeGeometry(railCurve, divisions, 0.0015, 6, true);
+}
+
+const railMat = new THREE.MeshStandardMaterial({ color: 0x8a8d90, metalness: 0.6, roughness: 0.4 });
+const railL = new THREE.Mesh(buildRail(GAUGE / 2), railMat);
+const railR = new THREE.Mesh(buildRail(-GAUGE / 2), railMat);
+railL.castShadow = true;
+railR.castShadow = true;
+trackGroup.add(railL, railR);
+
+const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 1 });
+const sleeperGeo = new THREE.BoxGeometry(GAUGE * 2.2, 0.0015, 0.012);
+const SLEEPER_COUNT = 180;
+for (let i = 0; i < SLEEPER_COUNT; i++) {
+  const t = i / SLEEPER_COUNT;
+  const p = curve.getPointAt(t);
+  const tangent = curve.getTangentAt(t);
+  const sleeper = new THREE.Mesh(sleeperGeo, sleeperMat);
+  sleeper.position.copy(p);
+  sleeper.position.y -= 0.0018;
+  sleeper.lookAt(p.clone().add(tangent));
+  trackGroup.add(sleeper);
+}
+
+// ---------- Train: tank engine + two coaches (simplified placeholder shapes) ----------
+function makeLoco() {
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1f3b57, metalness: 0.3, roughness: 0.5 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.045, 0.028), bodyMat);
+  body.position.y = 0.0225;
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.026), bodyMat);
+  cab.position.set(-0.03, 0.045, 0);
+  g.add(body, cab);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
+function makeCoach() {
+  const mat = new THREE.MeshStandardMaterial({ color: 0x7a2e2e, roughness: 0.6 });
+  const coach = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.04, 0.026), mat);
+  coach.position.y = 0.02;
+  coach.castShadow = true;
+  return coach;
+}
+
+const loco = makeLoco();
+const coach1 = makeCoach();
+const coach2 = makeCoach();
+trackGroup.add(loco, coach1, coach2);
+
+// ---------- Train motion ----------
+let scaleMph = 25;
+let running = true;
+let trainT = 0; // 0..1 position along the curve
+
+function metresPerSecondFromScaleMph(mph) {
+  const realMps = mph * 0.44704; // mph -> m/s at full size
+  return realMps / SCALE;        // model speed at 1:76
+}
+
+function tOffset(metres) {
+  return metres / trackLength;
+}
+
+function placeAt(obj, t) {
+  t = ((t % 1) + 1) % 1;
+  const p = curve.getPointAt(t);
+  const tangent = curve.getTangentAt(t);
+  obj.position.copy(p);
+  obj.position.y += 0.025;
+  obj.lookAt(p.clone().add(tangent));
+}
+
+function updateTrain(dt) {
+  if (running) {
+    const modelMps = metresPerSecondFromScaleMph(scaleMph);
+    trainT = (trainT + (modelMps * dt) / trackLength) % 1;
+  }
+  placeAt(loco, trainT);
+  placeAt(coach1, trainT - tOffset(0.17));
+  placeAt(coach2, trainT - tOffset(0.34));
+}
+
+// ---------- Cameras ----------
+// Child's-eye: orbits the track, height clamped to 30-50cm off the floor.
+childCamera.position.set(trackGroup.position.x + 1.0, 0.4, trackGroup.position.z + 1.0);
+const childControls = new OrbitControls(childCamera, renderer.domElement);
+childControls.target.set(trackGroup.position.x, 0.1, trackGroup.position.z);
+childControls.minDistance = 0.3;
+childControls.maxDistance = 4;
+childControls.maxPolarAngle = Math.PI * 0.49;
+childControls.update();
+childControls.addEventListener('change', () => {
+  childCamera.position.y = Math.min(0.5, Math.max(0.3, childCamera.position.y));
+});
+
+// Bird's-eye: top-down plan view of the living room.
+birdCamera.position.set(0, 6, 0.001);
+birdCamera.lookAt(0, 0, 0);
+const birdControls = new OrbitControls(birdCamera, renderer.domElement);
+birdControls.target.set(0, 0, 0);
+birdControls.maxPolarAngle = 0.1;
+birdControls.minDistance = 2;
+birdControls.maxDistance = 12;
+birdControls.update();
+
+// ---------- UI ----------
+const btnChild = document.getElementById('viewChild');
+const btnBird = document.getElementById('viewBird');
+btnChild.addEventListener('click', () => {
+  activeCamera = childCamera;
+  btnChild.classList.add('active');
+  btnBird.classList.remove('active');
+});
+btnBird.addEventListener('click', () => {
+  activeCamera = birdCamera;
+  btnBird.classList.add('active');
+  btnChild.classList.remove('active');
+});
+
+const toggleBtn = document.getElementById('toggleRun');
+toggleBtn.addEventListener('click', () => {
+  running = !running;
+  toggleBtn.textContent = running ? 'Pause' : 'Run';
+});
+
+const speedSlider = document.getElementById('speedSlider');
+const speedLabel = document.getElementById('speedLabel');
+speedSlider.addEventListener('input', () => {
+  scaleMph = Number(speedSlider.value);
+  speedLabel.textContent = scaleMph;
+});
+
+// ---------- Resize ----------
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  [childCamera, birdCamera].forEach((cam) => {
+    cam.aspect = window.innerWidth / window.innerHeight;
+    cam.updateProjectionMatrix();
+  });
+});
+
+// ---------- Animate ----------
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  updateTrain(dt);
+  if (activeCamera === childCamera) childControls.update();
+  if (activeCamera === birdCamera) birdControls.update();
+  renderer.render(scene, activeCamera);
+}
+animate();
+</script>
+</body>
+</html>

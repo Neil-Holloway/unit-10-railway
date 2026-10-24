@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "unit-10-railway",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "/Users/njholloway/Projects/unit-10-railway"],
+      "port": 4173
+    }
+  ]
+}
