@@ -304,16 +304,19 @@ addBlock(
 );
 
 // ---------- Track: one oval (stadium shape — two straights + two semicircles) ----------
+// First iteration: fitted into the open corridor running down the middle
+// of the room, between the kitchen/left-wall cupboard (west side) and the
+// sofa/doorway units (east side). The oval's footprint is STRAIGHT_LEN +
+// 2*TRACK_RADIUS long (3.9m) by 2*TRACK_RADIUS wide (1.5m); centred at
+// x=-0.675, z=-1.46 this clears every placed piece of furniture, with the
+// tightest margin (~16cm) against the sofa chaise and the left-wall
+// cupboard where the corridor narrows to 1.82m.
 const trackGroup = new THREE.Group();
-// Rotated 90° so the long axis runs along the room's depth (Z), fitting in
-// the open floor east of the kitchen nook and clear of the doorway gap.
+// Rotated 90° so the long axis runs along the room's depth (Z), matching
+// the shape of the open corridor.
 trackGroup.rotation.y = Math.PI / 2;
-trackGroup.position.set(2.5, 0, 0);
+trackGroup.position.set(-0.675, 0, -1.46);
 scene.add(trackGroup);
-// Hidden for now — position is stale (keyed to the old rectangular room)
-// and needs refitting into whatever open floor remains once the kitchen,
-// table and sofa are repositioned against the new L-shaped room.
-trackGroup.visible = false;
 
 const TRACK_HEIGHT = 0.003; // ~3mm rail height off the floor
 
@@ -457,11 +460,10 @@ function updateTrain(dt) {
 
 // ---------- Cameras ----------
 // Child's-eye: orbits the room, height clamped to 30-50cm off the floor.
-// Track-relative offset is stale while trackGroup is hidden (see above) —
-// defaults to a point near the room's centre instead.
-childCamera.position.set(0, 0.4, -2);
+// Defaults to a point just south of the track, looking north across it.
+childCamera.position.set(-0.675, 0.4, -3.5);
 const childControls = new OrbitControls(childCamera, renderer.domElement);
-childControls.target.set(0, 0.1, 1);
+childControls.target.set(-0.675, 0.1, -1.46);
 childControls.minDistance = 0.3;
 childControls.maxDistance = 4;
 childControls.maxPolarAngle = Math.PI * 0.49;
