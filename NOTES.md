@@ -30,10 +30,22 @@ Published page: https://claude.ai/artifact/1cDaXzmzpCW3XtuM8986z1
 - Friends can see my flat; no need to hide it.
 
 ## Still needed from me
-- Living room furniture: what is there and roughly where (sizes help).
+- Living room furniture (non-kitchen: sofa, table etc.) — what is there and roughly where (sizes help).
 - Photos of the living room from different corners, plus close-ups of the floor, a wall and a door.
 - Supabase project URL and anon (public) key. Never the service_role key.
-- Name of an empty GitHub repository for the code.
+
+## Kitchen units (from hand-measured sketch, 2026-10-24)
+U-shaped kitchen in the back-left corner of the living room/kitchen, against the real back wall and left wall. All measurements in cm on the sketch, confirmed/read as plan-view (top-down) lengths, converted to metres in the scaffold. Box footprints only, not real unit models — placed so track can be routed clear. Needs checking against photos before treating as exact.
+
+- Left wall run: 3.62 m of worktop from the back-left corner, 0.6 m deep, then 0.82 m left clear before the front-left corner.
+- Tall larder/fridge unit at the back-left corner, 0.45 m deep.
+- Front wall run: 2.6 m of worktop from the front-left corner, 0.6 m deep.
+- Doorway gap: 1.8 m clear from the end of that run to the corner of the kitchen (confirmed: this is the distance from the doorway to the kitchen corner).
+- Peninsula (the kitchen's "right wall", closing the U): 3.5 m run from the back wall, 0.6 m deep, starting at the corner of the kitchen.
+- Cupboard/freezer/cupboard tower near the back end of the peninsula, ~0.9 m wide.
+- Worktop height assumed 0.9 m, tall units assumed 2.0 m (not from the sketch — standard values, ceiling is 2.28 m so plausible).
+
+Track in the scaffold was rotated 90° and moved into the open floor east of the peninsula (clear of both the units and the doorway gap) to make room for this.
 
 ## Plan
 1. Living room in full detail: furniture and finishes, first loop routed clear of furniture, both views.

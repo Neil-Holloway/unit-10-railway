@@ -137,11 +137,83 @@ wallRight.position.set(ROOM_W / 2, CEILING_H / 2, 0);
 wallRight.rotation.y = -Math.PI / 2;
 scene.add(wallRight);
 
+// ---------- Kitchen units: U-shaped nook in the back-left corner ----------
+// Reconstructed from a hand-measured sketch (see NOTES.md, "Kitchen units").
+// Box footprints only — not real unit models — placed so the track can be
+// routed clear of them. Numbers are best-effort reads of the sketch, in cm,
+// converted to metres; confirm against photos before treating as exact.
+const kitchenGroup = new THREE.Group();
+scene.add(kitchenGroup);
+
+const UNIT_DEPTH = 0.6;      // standard worktop depth
+const WORKTOP_H = 0.9;       // standard worktop height
+const TALL_UNIT_H = 2.0;     // fridge / larder / freezer tower height
+const backZ = -ROOM_D / 2;
+const frontZ = ROOM_D / 2;
+const leftX = -ROOM_W / 2;
+
+const unitMat = new THREE.MeshStandardMaterial({ color: 0xe4e1da, roughness: 0.7 });
+const applianceMat = new THREE.MeshStandardMaterial({ color: 0xc9cdd1, roughness: 0.4, metalness: 0.3 });
+
+function addBlock(parent, mat, w, h, d, cx, cy, cz) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(cx, cy, cz);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+// Left wall run: 3.62m of worktop (the sketch's "360"), leaving 0.82m clear
+// at the front end before the corner — matches sketch reading of 82cm.
+const leftRunDepth = 3.62;
+addBlock(
+  kitchenGroup, unitMat,
+  UNIT_DEPTH, WORKTOP_H, leftRunDepth,
+  leftX + UNIT_DEPTH / 2, WORKTOP_H / 2, backZ + leftRunDepth / 2
+);
+
+// Tall larder/fridge unit at the back-left corner, 45cm deep (sketch "45").
+addBlock(
+  kitchenGroup, applianceMat,
+  0.45, TALL_UNIT_H, 0.6,
+  leftX + 0.225, TALL_UNIT_H / 2, backZ + 0.3
+);
+
+// Front wall run: 2.6m of worktop from the front-left corner (sketch "260"),
+// then an 1.8m clear gap to the doorway (sketch "180" — confirmed as the
+// distance from the doorway to the corner of the kitchen).
+const frontRunLen = 2.6;
+addBlock(
+  kitchenGroup, unitMat,
+  frontRunLen, WORKTOP_H, UNIT_DEPTH,
+  leftX + frontRunLen / 2, WORKTOP_H / 2, frontZ - UNIT_DEPTH / 2
+);
+
+// Peninsula ("right wall" of the kitchen nook, sketch "350"): runs from the
+// back wall most of the way to the front, closing the U. Corner of the
+// kitchen (where the 180cm doorway gap ends) sits at its front-left edge.
+const peninsulaX = leftX + frontRunLen + 1.8; // corner of kitchen
+const peninsulaLen = 3.5;
+addBlock(
+  kitchenGroup, unitMat,
+  UNIT_DEPTH, WORKTOP_H, peninsulaLen,
+  peninsulaX + UNIT_DEPTH / 2, WORKTOP_H / 2, backZ + peninsulaLen / 2
+);
+
+// Cupboard / freezer / cupboard tower near the back end of the peninsula.
+addBlock(
+  kitchenGroup, applianceMat,
+  UNIT_DEPTH, TALL_UNIT_H, 0.9,
+  peninsulaX + UNIT_DEPTH / 2, TALL_UNIT_H / 2, backZ + 0.45
+);
+
 // ---------- Track: one oval (stadium shape — two straights + two semicircles) ----------
 const trackGroup = new THREE.Group();
-// Placeholder position: clear of walls, in the open floor. Will move once
-// real furniture layout is known (see NOTES.md "Still needed").
-trackGroup.position.set(0, 0, 0.2);
+// Rotated 90° so the long axis runs along the room's depth (Z), fitting in
+// the open floor east of the kitchen nook and clear of the doorway gap.
+trackGroup.rotation.y = Math.PI / 2;
+trackGroup.position.set(2.5, 0, 0);
 scene.add(trackGroup);
 
 const TRACK_HEIGHT = 0.003; // ~3mm rail height off the floor
