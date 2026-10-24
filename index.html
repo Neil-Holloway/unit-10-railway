@@ -97,8 +97,6 @@ function wallLength(p1, p2) {
 }
 
 // ---------- OO gauge track ----------
-const TRACK_RADIUS = 0.75;  // metres — curve radius at each end of the oval
-const STRAIGHT_LEN = 2.4;   // metres — length of each straight section
 const GAUGE = 0.0165;       // metres — 16.5mm, OO gauge
 const SCALE = 76;           // 1:76
 
@@ -303,41 +301,57 @@ addBlock(
   B.x - 1.20 / 2, BOOKCASE_H / 2, A.z + 0.35 / 2
 );
 
-// ---------- Track: one oval (stadium shape — two straights + two semicircles) ----------
-// First iteration: fitted into the open corridor running down the middle
-// of the room, between the kitchen/left-wall cupboard (west side) and the
-// sofa/doorway units (east side). The oval's footprint is STRAIGHT_LEN +
-// 2*TRACK_RADIUS long (3.9m) by 2*TRACK_RADIUS wide (1.5m); centred at
-// x=-0.675, z=-1.46 this clears every placed piece of furniture, with the
-// tightest margin (~16cm) against the sofa chaise and the left-wall
-// cupboard where the corridor narrows to 1.82m.
+// ---------- Track: perimeter loop ----------
+// Second iteration: instead of a compact oval sitting in the middle of the
+// room, the loop hugs the room's actual furniture on both the outbound and
+// return legs, using the full depth of the room (north wall down to the
+// doorway foyer by the entrance, per NOTES.md). Two separated lanes
+// (outbound down the west/kitchen side, return up the east/sofa side) run
+// parallel wherever the room is wide enough, and funnel close together
+// through two genuine pinch points where the room narrows to a single
+// double-track-width corridor:
+//   - the kitchen/doorway-cupboard neck (x 0.415-1.585, z 0.75-3.45)
+//   - the sofa-chaise neck (x -1.585-0.235, z -1.855 to -0.955)
+// The south end finishes in the open doorway foyer (NOTES.md: "100cm clear
+// from the doorway corner"), close to the corner nearest the entrance, so
+// it is ready to be extended through a tunnel toward the hall later
+// (see NOTES.md "Plan", item 4). All coordinates are absolute room/world
+// metres, so trackGroup carries no transform of its own.
 const trackGroup = new THREE.Group();
-// Rotated 90° so the long axis runs along the room's depth (Z), matching
-// the shape of the open corridor.
-trackGroup.rotation.y = Math.PI / 2;
-trackGroup.position.set(-0.675, 0, -1.46);
 scene.add(trackGroup);
 
 const TRACK_HEIGHT = 0.003; // ~3mm rail height off the floor
 
-function stadiumCenterline(halfStraight, radius, archSegs = 48) {
-  const pts = [];
-  pts.push(new THREE.Vector3(-halfStraight, TRACK_HEIGHT, -radius));
-  pts.push(new THREE.Vector3(halfStraight, TRACK_HEIGHT, -radius));
-  for (let i = 1; i <= archSegs; i++) {
-    const a = -Math.PI / 2 + (Math.PI * i) / archSegs;
-    pts.push(new THREE.Vector3(halfStraight + radius * Math.cos(a), TRACK_HEIGHT, radius * Math.sin(a)));
-  }
-  pts.push(new THREE.Vector3(-halfStraight, TRACK_HEIGHT, radius));
-  for (let i = 1; i <= archSegs; i++) {
-    const a = Math.PI / 2 + (Math.PI * i) / archSegs;
-    pts.push(new THREE.Vector3(-halfStraight + radius * Math.cos(a), TRACK_HEIGHT, radius * Math.sin(a)));
-  }
-  pts.pop(); // drop duplicate closing point; curve is closed=true below
-  return pts;
-}
+const TRACK_WAYPOINTS = [
+  // -- west lane, south-bound, clear of the left-wall cupboard then the kitchen --
+  [-1.35, -3.90], // north turn, west end
+  [-1.35, -2.20], // clear of left-wall cupboard
+  [-1.10, -1.40], // through the sofa-chaise neck (paired with the east lane at the same z)
+  [-1.10, -0.30], // past the chaise, cupboard still clearing to the west
+  [-0.30,  0.30], // crossing the fully-open band in front of the doorway gap
+  [ 0.65,  0.90], // entering the kitchen/doorway-cupboard neck
+  [ 0.65,  2.00],
+  [ 0.65,  3.00], // bathroom wall now on the west side, not furniture
+  [ 0.65,  3.90], // exiting the neck into the doorway foyer
+  // -- south turn, in the open doorway foyer near the entrance corner --
+  [ 0.90,  4.15],
+  [ 1.60,  4.20], // apex closest to the doorway corner — ready to extend later
+  // -- east lane, north-bound, clear of the doorway cupboards then the sofa --
+  [ 1.35,  3.90],
+  [ 1.35,  3.00],
+  [ 1.35,  2.00],
+  [ 1.35,  0.90], // exiting the kitchen/doorway-cupboard neck
+  [ 0.90,  0.30], // crossing the fully-open band
+  [ 0.30, -0.50],
+  [-0.10, -1.40], // through the sofa-chaise neck (paired with the west lane)
+  [ 0.70, -2.30], // clear of the sofa (main piece)'s west edge
+  [ 0.90, -3.30],
+  [ 0.85, -3.90], // north turn, east end
+  // -- north turn, in the open band below the north wall --
+  [-0.30, -4.15],
+];
 
-const centreline = stadiumCenterline(STRAIGHT_LEN / 2, TRACK_RADIUS);
+const centreline = TRACK_WAYPOINTS.map(([x, z]) => new THREE.Vector3(x, TRACK_HEIGHT, z));
 const curve = new THREE.CatmullRomCurve3(centreline, true, 'catmullrom', 0.0);
 const trackLength = curve.getLength();
 
@@ -460,10 +474,11 @@ function updateTrain(dt) {
 
 // ---------- Cameras ----------
 // Child's-eye: orbits the room, height clamped to 30-50cm off the floor.
-// Defaults to a point just south of the track, looking north across it.
-childCamera.position.set(-0.675, 0.4, -3.5);
+// Defaults to a point in the wide-open band in front of the kitchen/
+// doorway neck, looking along both lanes of the loop.
+childCamera.position.set(0, 0.4, 1.3);
 const childControls = new OrbitControls(childCamera, renderer.domElement);
-childControls.target.set(-0.675, 0.1, -1.46);
+childControls.target.set(0, 0.1, -0.3);
 childControls.minDistance = 0.3;
 childControls.maxDistance = 4;
 childControls.maxPolarAngle = Math.PI * 0.49;
