@@ -47,6 +47,58 @@ U-shaped kitchen in the back-left corner of the living room/kitchen, against the
 
 Track in the scaffold was rotated 90° and moved into the open floor east of the peninsula (clear of both the units and the doorway gap) to make room for this.
 
+## Living room furniture + kitchen corrections (from hand-measured sketch, 2026-10-24, second pass)
+
+Confirmed with George/me on 2026-10-24. These correct/extend the kitchen section above and add the first living-room furniture (previously listed as "still needed").
+
+- **Table**: 125cm × 75cm. Gap from the table to the kitchen worktop edge is 75cm.
+- **Sofa**: L-shaped. Total length along the wall is 300cm. The piece sticking out (the return/chaise) is 195cm × 90cm. The piece running along the wall is 210cm × 108cm.
+- **Doorway-side cupboard run** (previously under-specified as "~0.9m wide tower"): from the doorway, 100cm clear, then a cupboard (84cm), a fridge/freezer (103cm), another cupboard (84cm), then 170cm clear to the L-section of the sofa. Total run ≈ 541cm — **too long to fit the 4.44m room depth as currently modelled, so this is not the same wall as the existing "left wall run"/kitchen worktop. Placement (which wall) needs confirming before updating the 3D scene — see question to George/Neil below.**
+- **Peninsula/right-side cupboard correction**: the unit previously modelled as a tall tower (cupboard/freezer/cupboard, ~0.9m wide, 2.0m tall) at the back end of the peninsula is wrong — it's actually a **long, low cupboard run**, 360cm wide, worktop height (not tall-unit height), positioned 82cm out from the kitchen worktop and 100cm from the table. This likely supersedes/corrects the earlier "peninsula 3.5m run + separate tower" reading — needs reconciling against the 3D model.
+
+**Room size correction (2026-10-24, third pass)**: the original 7.74m × 4.44m was only approximate and didn't include the entrance area. Confirmed overall room size is **437cm × 891cm** (4.37m × 8.91m). The 891cm long wall is the doorway → cupboard/freezer/cupboard → sofa wall: 100 + 84 (cupboard) + 103 (freezer) + 84 (cupboard) + 170 + 300 (sofa run) + 15 + 35 = 891cm, confirmed as a direct sum by George. The gap between the right-hand wall and the room entrance is 177cm.
+
+**Resolved (simplified overview sketch, 2026-10-24, fourth pass)**: the room is **not a simple rectangle** — it's notched. Reading the sketch (origin at the bottom-right corner, +X left, +Y up the page):
+- Right wall: 891cm, straight, running from bottom-right corner to top-right corner. This is the wall the doorway/cupboard/freezer/cupboard/sofa run (confirmed sum above) is measured along — labelled "Cupboard" (lower) then "Sofa" (upper) going up this wall.
+- Top wall: 437cm (the overall width), from top-right corner to top-left corner.
+- Left wall: straight, from top-left corner down to the kitchen's near corner.
+- Then the boundary steps inward (a notch cut from the bottom-left corner of the overall 437×891 bounding box): kitchen wall 260cm (left, at the stepped-in depth), then 180cm perpendicular (stepping back out towards the bottom wall), then bottom wall 177cm back to the bottom-right corner.
+- Check: 177 + 260 = 437 — the notch exactly accounts for the rest of the overall width, confirming the reading.
+
+So the footprint is an L-shape / rectangle-with-a-corner-notch: overall bounding box 437cm × 891cm, with a 260cm × 180cm rectangular notch removed from the corner where the kitchen and entrance meet. **Confirmed: the notch is the bathroom** — i.e. that 260×180cm corner of the overall bounding box belongs to the bathroom, not the living room/kitchen floor.
+
+**Derived polygon** (metres, going A→B→C→D→E→F→A; +X = overall width direction, +Z = overall depth direction, origin arbitrary — placed at the top-right corner B for convenience):
+- A (top-left) = (-4.37, 0)
+- B (top-right) = (0, 0)
+- C (bottom-right) = (0, -8.91)
+- D = (-1.77, -8.91) — bottom wall is 1.77m (C→D)
+- E = (-1.77, -7.11) — the 1.80m notch wall (D→E)
+- F (left wall bottom) = (-4.37, -7.11) — the kitchen wall, 2.60m (E→F)
+- back to A: left wall F→A is 7.11m
+
+Right wall (B→C, 8.91m) carries the doorway/cupboard/freezer/cupboard/sofa run. Wall E→F (2.60m) is the same length as the kitchen's previously-recorded "front wall run" — likely the same wall. Wall D→E (1.80m) is the same length as the previously-recorded "doorway gap" — likely also the same wall, but as an actual notch wall (bathroom wall) rather than open clear space as originally assumed. **Still needs reconciling**: the existing kitchen unit placements (left wall run 3.62m, tall larder, peninsula 3.5m/corrected to 360cm low cupboard run, cupboard/freezer/cupboard — now understood to be the 84/103/84 units on the 8.91m wall, not a separate tower) all need re-anchoring to this new polygon before the 3D model is rebuilt.
+
+## Kitchen layout — simplified (2026-10-24, fifth pass, supersedes earlier kitchen readings)
+
+Earlier kitchen sketches proved too ambiguous to place reliably (see "Kitchen units" section above — left run 3.62m, peninsula 3.5m/360cm, 82cm gap, cupboard/freezer/cupboard etc. were all best-effort reads). George has simplified instead of trying to resolve every number:
+
+- Worktop runs in a **U shape**: two legs + a base.
+- **Both legs of the U = 260cm long.**
+- **All worktop is 60cm deep** (both legs and the base).
+- **Base of the U (containing the sink) = 130cm long.**
+- Sink sits in the base of the U. A hob was shown in the discarded sketch on what looked like a separate/lower section — not yet re-confirmed against this simplified U; treat hob position as unplaced for now.
+- This supersedes the earlier "left wall run 3.62m / front run 2.6m / peninsula 3.5m or 360cm / 82cm gap / cupboard-freezer-cupboard tower" description — the U's two legs replace the left run and peninsula, and the base replaces the old front run.
+- **Orientation (2026-10-24, sixth pass)**: the U's open side faces across the room toward the doorway-side cupboard/freezer/cupboard run (the 84/103/84cm units on the long 891cm wall) — i.e. the U looks out across the open floor at that run.
+- **Left wall placement (2026-10-24, sixth pass)**: a single long low cupboard, 360cm, runs along the room's **left wall** (A→F, 7.11m — this is the wall previously miscast as a "peninsula" or "tower"; it is one continuous run, not three separate units). Sequence down the left wall from the top-left corner (A): 79cm gap, then the 360cm cupboard, then an 82cm gap, then the kitchen U begins.
+- **Confirmed (2026-10-24, seventh pass)**: the U's 130cm base sits flush against the same left wall, continuing straight on after the 82cm gap, with the two 260cm legs projecting perpendicular into the room. Still unplaced: the tall larder/fridge unit (45cm) and the hob.
+
+## Sofa + bookcase positioning (2026-10-24, seventh pass)
+
+- **Sofa confirmed on the right wall** (B→C, 891cm) — same wall as the doorway/cupboard/freezer/cupboard run already modelled. This matches the existing 300cm L-shaped sofa (main piece 210×108, chaise 195×90) already placed against that wall — no change needed there.
+- **Confirmed: bookcase** — 120cm wide (along the top wall) × 35cm deep, positioned at right angles to the sofa in the **upper corner** of the room (top-right corner, where the right wall meets the top wall, i.e. runs along the top wall B→A direction). A 25cm gap separates the bookcase from the start of the sofa run.
+- **3D model note**: the bookcase was placed flush against the top wall (more physically plausible than floating it off the wall by a gap). With the sofa's position anchored from the doorway/cupboard side (well-confirmed, see sum above), this leaves a computed ~15cm gap to the sofa rather than the stated 25cm — a ~10cm discrepancy, within hand-measurement tolerance given the 891cm wall itself summed to 901cm using all the individual pieces including this gap. Not treated as an error requiring rework.
+- Sketch also shows extra sofa step detail (108 / 20 / 90 / 195 near the top of the sofa run) beyond the already-modelled two-box L-shape — **not yet clear whether this refines the existing shape or is redundant with it**; treating the existing simplified two-box sofa as good enough for now unless told otherwise.
+
 ## Plan
 1. Living room in full detail: furniture and finishes, first loop routed clear of furniture, both views.
 2. Room builder and track builder (OO-gauge pieces, points, gradients, tunnels through walls).

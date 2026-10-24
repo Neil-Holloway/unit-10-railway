@@ -71,9 +71,30 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 ------------------------------------------------------------------------- */
 
 // ---------- Unit 10: living room / kitchen (measured) ----------
-const ROOM_W = 7.74;      // metres — along the long wall
-const ROOM_D = 4.44;      // metres
+// The room is NOT a simple rectangle — a corner is cut away for the
+// bathroom. Overall bounding box 4.37m x 8.91m, with a 2.60m x 1.80m
+// notch removed from the corner where the kitchen and entrance meet
+// (see NOTES.md, "Living room furniture + kitchen corrections", third
+// and fourth passes). ROOM_POLY walks the six real walls in order;
+// coordinates are metres, origin near the room's centre.
 const CEILING_H = 2.28;   // metres
+
+const ROOM_BOUND_W = 4.37;  // metres — overall bounding-box width (camera framing only)
+const ROOM_BOUND_D = 8.91;  // metres — overall bounding-box depth (camera framing only)
+
+// A -> B -> C -> D -> E -> F -> back to A
+const ROOM_POLY = [
+  [-2.185, -4.455], // A — top-left
+  [ 2.185, -4.455], // B — top-right
+  [ 2.185,  4.455], // C — bottom-right; B-C is the 8.91m doorway/cupboard/sofa wall
+  [ 0.415,  4.455], // D — C-D is the 1.77m bottom wall stub
+  [ 0.415,  2.655], // E — D-E is the 1.80m bathroom notch wall
+  [-2.185,  2.655], // F — E-F is the 2.60m kitchen wall
+];                   // F-A (7.11m) is the remaining left wall
+
+function wallLength(p1, p2) {
+  return Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+}
 
 // ---------- OO gauge track ----------
 const TRACK_RADIUS = 0.75;  // metres — curve radius at each end of the oval
@@ -104,8 +125,8 @@ const BIRD_VIEW_MARGIN = 1.15; // 15% padding around the room on all sides
 const birdCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 50);
 function updateBirdFrustum() {
   const aspect = window.innerWidth / window.innerHeight;
-  const neededHalfX = (ROOM_W / 2) * BIRD_VIEW_MARGIN;
-  const neededHalfZ = (ROOM_D / 2) * BIRD_VIEW_MARGIN;
+  const neededHalfX = (ROOM_BOUND_W / 2) * BIRD_VIEW_MARGIN;
+  const neededHalfZ = (ROOM_BOUND_D / 2) * BIRD_VIEW_MARGIN;
   let halfZ = neededHalfZ;
   let halfX = halfZ * aspect;
   if (halfX < neededHalfX) {
@@ -129,58 +150,67 @@ sun.position.set(3, 4, 2);
 sun.castShadow = true;
 scene.add(sun);
 
-// ---------- Room shell: floor + four walls ----------
+// ---------- Room shell: L-shaped floor + one wall per polygon edge ----------
+const floorShape = new THREE.Shape();
+ROOM_POLY.forEach(([x, z], i) => {
+  // The shape plane becomes the floor once rotated -90° about X, which
+  // maps local y to world -z — so plot (x, -z) here.
+  if (i === 0) floorShape.moveTo(x, -z);
+  else floorShape.lineTo(x, -z);
+});
+floorShape.closePath();
+
 const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(ROOM_W, ROOM_D),
-  new THREE.MeshStandardMaterial({ color: 0xb79c7a, roughness: 0.9 }) // placeholder wood finish
+  new THREE.ShapeGeometry(floorShape),
+  new THREE.MeshStandardMaterial({ color: 0xb79c7a, roughness: 0.9, side: THREE.DoubleSide }) // placeholder wood finish
 );
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
 
 const wallMat = new THREE.MeshStandardMaterial({ color: 0xf2efe9, roughness: 0.95, side: THREE.DoubleSide });
-function makeWall(length) {
+function addWall(p1, p2) {
+  const length = wallLength(p1, p2);
+  const vertical = Math.abs(p1[0] - p2[0]) < 1e-6; // edge runs along Z
   const wall = new THREE.Mesh(new THREE.PlaneGeometry(length, CEILING_H), wallMat);
+  wall.position.set((p1[0] + p2[0]) / 2, CEILING_H / 2, (p1[1] + p2[1]) / 2);
+  wall.rotation.y = vertical ? Math.PI / 2 : 0;
   wall.receiveShadow = true;
+  scene.add(wall);
   return wall;
 }
+for (let i = 0; i < ROOM_POLY.length; i++) {
+  addWall(ROOM_POLY[i], ROOM_POLY[(i + 1) % ROOM_POLY.length]);
+}
 
-const wallBack = makeWall(ROOM_W);
-wallBack.position.set(0, CEILING_H / 2, -ROOM_D / 2);
-scene.add(wallBack);
-
-const wallFront = makeWall(ROOM_W);
-wallFront.position.set(0, CEILING_H / 2, ROOM_D / 2);
-wallFront.rotation.y = Math.PI;
-scene.add(wallFront);
-
-const wallLeft = makeWall(ROOM_D);
-wallLeft.position.set(-ROOM_W / 2, CEILING_H / 2, 0);
-wallLeft.rotation.y = Math.PI / 2;
-scene.add(wallLeft);
-
-const wallRight = makeWall(ROOM_D);
-wallRight.position.set(ROOM_W / 2, CEILING_H / 2, 0);
-wallRight.rotation.y = -Math.PI / 2;
-scene.add(wallRight);
-
-// ---------- Kitchen units: U-shaped nook in the back-left corner ----------
-// Reconstructed from a hand-measured sketch (see NOTES.md, "Kitchen units").
-// Box footprints only — not real unit models — placed so the track can be
-// routed clear of them. Numbers are best-effort reads of the sketch, in cm,
-// converted to metres; confirm against photos before treating as exact.
+// ---------- Furniture: kitchen U, table, cupboard run, sofa ----------
+// First-pass layout anchored to the confirmed ROOM_POLY corners (see
+// NOTES.md, "Living room furniture + kitchen corrections", passes 2-4).
+// Box footprints only — not real unit/furniture models. Several
+// placements are best-effort interpretations of ambiguous sketch notes
+// (flagged below with ASSUMPTION) and still need confirming against
+// photos before treating as exact.
 const kitchenGroup = new THREE.Group();
-scene.add(kitchenGroup);
+const furnitureGroup = new THREE.Group();
+scene.add(kitchenGroup, furnitureGroup);
 
 const UNIT_DEPTH = 0.6;      // standard worktop depth
 const WORKTOP_H = 0.9;       // standard worktop height
-const TALL_UNIT_H = 2.0;     // fridge / larder / freezer tower height
-const backZ = -ROOM_D / 2;
-const frontZ = ROOM_D / 2;
-const leftX = -ROOM_W / 2;
+const TALL_UNIT_H = 2.0;     // fridge / larder height
+const SOFA_H = 0.8;          // ASSUMPTION — typical sofa back height, not measured
+const TABLE_H = 0.75;        // ASSUMPTION — typical table height, not measured
+
+// Room corners, named as in NOTES.md (x, z):
+const A = { x: -2.185, z: -4.455 }; // top-left (back-left of whole room)
+const F = { x: -2.185, z: 2.655 };  // kitchen's own back-left corner (left wall meets front wall)
+const E = { x: 0.415, z: 2.655 };   // kitchen's front-right corner (front wall meets bathroom notch wall)
+const B = { x: 2.185, z: -4.455 };  // top-right
+const C = { x: 2.185, z: 4.455 };   // bottom-right, by the entrance
 
 const unitMat = new THREE.MeshStandardMaterial({ color: 0xe4e1da, roughness: 0.7 });
 const applianceMat = new THREE.MeshStandardMaterial({ color: 0xc9cdd1, roughness: 0.4, metalness: 0.3 });
+const sofaMat = new THREE.MeshStandardMaterial({ color: 0x5b6b7a, roughness: 0.8 });
+const tableMat = new THREE.MeshStandardMaterial({ color: 0x6b4a33, roughness: 0.6 });
 
 function addBlock(parent, mat, w, h, d, cx, cy, cz) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -191,48 +221,99 @@ function addBlock(parent, mat, w, h, d, cx, cy, cz) {
   return mesh;
 }
 
-// Left wall run: 3.62m of worktop (the sketch's "360"), leaving 0.82m clear
-// at the front end before the corner — matches sketch reading of 82cm.
-const leftRunDepth = 3.62;
+// --- Left-wall cupboard: 360cm, low (worktop height, not a tall tower —
+// corrected from the original "peninsula tower" reading). Sequence along
+// the left wall (A-F, 7.11m) from A: 79cm gap, 360cm cupboard, 82cm gap,
+// then the kitchen U begins. Check: 0.79+3.60+0.82+0.60(leg)+1.30(base)
+// = 7.11m exactly — matches the full A-F wall length, confirming this
+// reading (see NOTES.md, "Kitchen layout — simplified").
+const cupboardStartZ = A.z + 0.79;
+const cupboardEndZ = cupboardStartZ + 3.60;
 addBlock(
   kitchenGroup, unitMat,
-  UNIT_DEPTH, WORKTOP_H, leftRunDepth,
-  leftX + UNIT_DEPTH / 2, WORKTOP_H / 2, backZ + leftRunDepth / 2
+  UNIT_DEPTH, WORKTOP_H, 3.60,
+  A.x + UNIT_DEPTH / 2, WORKTOP_H / 2, (cupboardStartZ + cupboardEndZ) / 2
 );
 
-// Tall larder/fridge unit at the back-left corner, 45cm deep (sketch "45").
-addBlock(
-  kitchenGroup, applianceMat,
-  0.45, TALL_UNIT_H, 0.6,
-  leftX + 0.225, TALL_UNIT_H / 2, backZ + 0.3
-);
-
-// Front wall run: 2.6m of worktop from the front-left corner (sketch "260"),
-// then an 1.8m clear gap to the doorway (sketch "180" — confirmed as the
-// distance from the doorway to the corner of the kitchen).
-const frontRunLen = 2.6;
+// --- Kitchen U: base (130cm, containing the sink) flush against the left
+// wall, with two 260cm legs projecting into the room (+X) from each end,
+// open side facing across the room toward the doorway-side cupboard run.
+// Leg 2 is the already-modelled front-wall run (F-E, 260cm) below — its
+// far edge (E.x = 0.415) exactly matches leg 1's far edge, closing the U.
+const leg1StartZ = cupboardEndZ + 0.82;      // 82cm gap after the cupboard
+const leg1EndZ = leg1StartZ + UNIT_DEPTH;    // leg is 60cm wide (same as worktop depth)
+const legReachX = F.x + 2.60;                // both legs project 260cm into the room
 addBlock(
   kitchenGroup, unitMat,
-  frontRunLen, WORKTOP_H, UNIT_DEPTH,
-  leftX + frontRunLen / 2, WORKTOP_H / 2, frontZ - UNIT_DEPTH / 2
+  legReachX - F.x, WORKTOP_H, UNIT_DEPTH,
+  (F.x + legReachX) / 2, WORKTOP_H / 2, (leg1StartZ + leg1EndZ) / 2
 );
-
-// Peninsula ("right wall" of the kitchen nook, sketch "350"): runs from the
-// back wall most of the way to the front, closing the U. Corner of the
-// kitchen (where the 180cm doorway gap ends) sits at its front-left edge.
-const peninsulaX = leftX + frontRunLen + 1.8; // corner of kitchen
-const peninsulaLen = 3.5;
+const baseStartZ = leg1EndZ;
+const baseEndZ = baseStartZ + 1.30;          // base is 130cm long; ends exactly at F
 addBlock(
   kitchenGroup, unitMat,
-  UNIT_DEPTH, WORKTOP_H, peninsulaLen,
-  peninsulaX + UNIT_DEPTH / 2, WORKTOP_H / 2, backZ + peninsulaLen / 2
+  UNIT_DEPTH, WORKTOP_H, 1.30,
+  F.x + UNIT_DEPTH / 2, WORKTOP_H / 2, (baseStartZ + baseEndZ) / 2
 );
 
-// Cupboard / freezer / cupboard tower near the back end of the peninsula.
+// --- Front wall run (U's second leg): the entire E-F wall, 2.60m. ---
 addBlock(
-  kitchenGroup, applianceMat,
-  UNIT_DEPTH, TALL_UNIT_H, 0.9,
-  peninsulaX + UNIT_DEPTH / 2, TALL_UNIT_H / 2, backZ + 0.45
+  kitchenGroup, unitMat,
+  Math.abs(E.x - F.x), WORKTOP_H, UNIT_DEPTH,
+  (E.x + F.x) / 2, WORKTOP_H / 2, F.z - UNIT_DEPTH / 2
+);
+
+// --- Table: 125 x 75cm, 100cm clear from the left-wall cupboard
+// (confirmed directly: "the right cupboard ... 100 from table"),
+// centred on the cupboard's length.
+const cupboardInnerX = A.x + UNIT_DEPTH;
+const tableW = 0.75, tableLen = 1.25;
+const tableNearX = cupboardInnerX + 1.0;
+addBlock(
+  furnitureGroup, tableMat,
+  tableW, TABLE_H, tableLen,
+  tableNearX + tableW / 2, TABLE_H / 2, (cupboardStartZ + cupboardEndZ) / 2
+);
+
+// --- Doorway-side cupboard/freezer/cupboard run, against the B-C wall ---
+// (the 891cm doorway->sofa wall). Sequence confirmed by direct sum in
+// NOTES.md: 100 clear (doorway) + 84 + 103 + 84 + 170 clear + 300 (sofa)
+// + 15 + 35 = 891, walking from C (by the entrance) toward B.
+// ASSUMPTION: worktop height for all three (not stated as tall units).
+let cz = C.z - 1.0; // 100cm clear from the doorway corner
+function addWallUnit(parent, mat, lengthAlongWall, depth, height) {
+  const startZ = cz;
+  cz -= lengthAlongWall;
+  addBlock(
+    parent, mat,
+    depth, height, lengthAlongWall,
+    B.x /* C.x === B.x */ - depth / 2, height / 2, (startZ + cz) / 2
+  );
+}
+addWallUnit(kitchenGroup, unitMat, 0.84, UNIT_DEPTH, WORKTOP_H);       // cupboard
+addWallUnit(kitchenGroup, applianceMat, 1.03, UNIT_DEPTH, WORKTOP_H);  // fridge/freezer
+addWallUnit(kitchenGroup, unitMat, 0.84, UNIT_DEPTH, WORKTOP_H);       // cupboard
+
+cz -= 1.70; // 170cm clear gap before the sofa
+
+// --- L-shaped sofa, 300cm total along the wall ---
+// Main piece (210 x 108) nearest the cupboards, chaise (195 x 90,
+// projecting further into the room) continuing toward B.
+addWallUnit(furnitureGroup, sofaMat, 2.10, 1.08, SOFA_H);  // main piece
+addWallUnit(furnitureGroup, sofaMat, 0.90, 1.95, SOFA_H);  // chaise, projects deeper into the room
+
+// --- Bookcase: 120 x 35cm, at right angles to the sofa in the top-right
+// corner (where the right wall meets the top wall), flush against the
+// top wall. A 25cm gap to the sofa was given, but placing the bookcase
+// flush against the wall (more physically plausible than floating it off
+// the wall) leaves a ~15cm computed gap to the sofa's far end instead —
+// the ~10cm discrepancy is within hand-measurement tolerance; flagged in
+// NOTES.md rather than silently forcing an exact match.
+const BOOKCASE_H = 1.8; // ASSUMPTION — typical bookcase height, not measured
+addBlock(
+  furnitureGroup, tableMat,
+  1.20, BOOKCASE_H, 0.35,
+  B.x - 1.20 / 2, BOOKCASE_H / 2, A.z + 0.35 / 2
 );
 
 // ---------- Track: one oval (stadium shape — two straights + two semicircles) ----------
@@ -242,6 +323,10 @@ const trackGroup = new THREE.Group();
 trackGroup.rotation.y = Math.PI / 2;
 trackGroup.position.set(2.5, 0, 0);
 scene.add(trackGroup);
+// Hidden for now — position is stale (keyed to the old rectangular room)
+// and needs refitting into whatever open floor remains once the kitchen,
+// table and sofa are repositioned against the new L-shaped room.
+trackGroup.visible = false;
 
 const TRACK_HEIGHT = 0.003; // ~3mm rail height off the floor
 
@@ -384,12 +469,12 @@ function updateTrain(dt) {
 }
 
 // ---------- Cameras ----------
-// Child's-eye: orbits the track, height clamped to 30-50cm off the floor.
-// Offset chosen to sit inside the open floor strip beside the track,
-// clear of the right wall and the kitchen peninsula.
-childCamera.position.set(trackGroup.position.x + 0.5, 0.4, trackGroup.position.z + 1.3);
+// Child's-eye: orbits the room, height clamped to 30-50cm off the floor.
+// Track-relative offset is stale while trackGroup is hidden (see above) —
+// defaults to a point near the room's centre instead.
+childCamera.position.set(0, 0.4, -2);
 const childControls = new OrbitControls(childCamera, renderer.domElement);
-childControls.target.set(trackGroup.position.x, 0.1, trackGroup.position.z);
+childControls.target.set(0, 0.1, 1);
 childControls.minDistance = 0.3;
 childControls.maxDistance = 4;
 childControls.maxPolarAngle = Math.PI * 0.49;
