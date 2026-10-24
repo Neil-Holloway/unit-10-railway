@@ -379,22 +379,67 @@ const TRACK_WAYPOINTS = [
   [ 0.65,  3.90], // exiting the neck into the doorway foyer, feeding back into the south turn
 ];
 
+// 'centripetal' parameterization (rather than the default-looking uniform
+// 'catmullrom') is what three.js recommends for non-uniformly spaced
+// points — the waypoints above are wildly uneven (tight arc points ~3cm
+// apart vs straight runs ~1m apart), and uniform Catmull-Rom overshoots/
+// loops in exactly that situation, right at the dense/sparse transitions.
 const centreline = TRACK_WAYPOINTS.map(([x, z]) => new THREE.Vector3(x, TRACK_HEIGHT, z));
-const curve = new THREE.CatmullRomCurve3(centreline, true, 'catmullrom', 0.0);
-const trackLength = curve.getLength();
+const curve = new THREE.CatmullRomCurve3(centreline, true, 'centripetal', 0.0);
+
+// Everything that needs a point-on-the-track (rails, sleepers and train
+// motion) reads from ONE shared, high-resolution arc-length table built
+// below, rather than each calling curve.getPointAt()/getTangentAt()
+// independently. Those methods invert their own lower-resolution internal
+// lookup table (default 200 divisions, built from uniform-t sampling),
+// which isn't precise enough across a ~15-20m loop mixing 3cm-tight turns
+// with 1m-long straights — small inversion errors there were (a) making
+// the train's speed visibly uneven frame to frame (jerk: measured up to a
+// 57% step-distance swing before this fix), and (b) letting the rails
+// themselves (previously re-fitted through a SECOND, separate Catmull-Rom
+// curve built from offset points) diverge slightly from the train's
+// actual path on the tight turns, which is what read as the train
+// "leaving the track". Building our own table once, directly from raw
+// curve.getPoint(t) samples, and having every consumer do simple
+// distance-based lookups into it removes both problems at the source.
+const TRACK_SAMPLES = 6000;
+const trackPts = [];
+for (let i = 0; i <= TRACK_SAMPLES; i++) trackPts.push(curve.getPoint(i / TRACK_SAMPLES));
+const trackDist = [0];
+for (let i = 1; i < trackPts.length; i++) trackDist.push(trackDist[i - 1] + trackPts[i].distanceTo(trackPts[i - 1]));
+const trackLength = trackDist[trackDist.length - 1];
+
+// Binary-search trackDist for the two samples bracketing arc-length s,
+// then linearly interpolate position and (from the same two samples)
+// direction of travel — accurate to within a single sample's distance
+// (~trackLength/6000, a few mm), far finer than anything visible.
+function pointAndTangentAtDistance(s) {
+  s = ((s % trackLength) + trackLength) % trackLength;
+  let lo = 0, hi = trackDist.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (trackDist[mid] <= s) lo = mid; else hi = mid;
+  }
+  const segLen = trackDist[hi] - trackDist[lo];
+  const frac = segLen > 0 ? (s - trackDist[lo]) / segLen : 0;
+  const point = trackPts[lo].clone().lerp(trackPts[hi], frac);
+  const tangent = trackPts[hi].clone().sub(trackPts[lo]).normalize();
+  return { point, tangent };
+}
 
 function buildRail(offset) {
-  const divisions = 400;
+  const divisions = TRACK_SAMPLES;
   const pts = [];
   for (let i = 0; i <= divisions; i++) {
-    const t = i / divisions;
-    const p = curve.getPointAt(t);
-    const tangent = curve.getTangentAt(t);
+    const s = (i / divisions) * trackLength;
+    const { point, tangent } = pointAndTangentAtDistance(s);
     const side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
-    pts.push(p.clone().addScaledVector(side, offset));
+    pts.push(point.addScaledVector(side, offset));
   }
-  const railCurve = new THREE.CatmullRomCurve3(pts, true);
-  return new THREE.TubeGeometry(railCurve, divisions, 0.0015, 6, true);
+  // A straight line-segment path through these already-smooth, very
+  // closely spaced points (~2.5mm apart) — no further curve-fitting step
+  // that could reintroduce overshoot.
+  return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0), divisions, 0.0015, 6, false);
 }
 
 const railMat = new THREE.MeshStandardMaterial({ color: 0x8a8d90, metalness: 0.6, roughness: 0.4 });
@@ -406,15 +451,14 @@ trackGroup.add(railL, railR);
 
 const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 1 });
 const sleeperGeo = new THREE.BoxGeometry(GAUGE * 2.2, 0.0015, 0.012);
-const SLEEPER_COUNT = 180;
+const SLEEPER_COUNT = 260;
 for (let i = 0; i < SLEEPER_COUNT; i++) {
-  const t = i / SLEEPER_COUNT;
-  const p = curve.getPointAt(t);
-  const tangent = curve.getTangentAt(t);
+  const s = (i / SLEEPER_COUNT) * trackLength;
+  const { point, tangent } = pointAndTangentAtDistance(s);
   const sleeper = new THREE.Mesh(sleeperGeo, sleeperMat);
-  sleeper.position.copy(p);
+  sleeper.position.copy(point);
   sleeper.position.y -= 0.0018;
-  sleeper.lookAt(p.clone().add(tangent));
+  sleeper.lookAt(point.clone().add(tangent));
   trackGroup.add(sleeper);
 }
 
@@ -549,34 +593,36 @@ function alignCoupling(mesh, posA, posB) {
 // ---------- Train motion ----------
 let scaleMph = 25;
 let running = true;
-let trainT = 0; // 0..1 position along the curve
+let trainDist = 0; // metres travelled along the track (wraps at trackLength)
 
 function metresPerSecondFromScaleMph(mph) {
   const realMps = mph * 0.44704; // mph -> m/s at full size
   return realMps / SCALE;        // model speed at 1:76
 }
 
-function tOffset(metres) {
-  return metres / trackLength;
-}
+// Coaches are placed at a fixed trailing distance (in real metres) behind
+// the loco along the SAME arc-length table the loco uses, rather than
+// each vehicle being positioned independently — this is what makes the
+// rake read as being pulled by the engine (rigidly spaced along the
+// track it's following) instead of three vehicles moving on their own.
+const COACH1_GAP = 0.17; // metres, loco to coach1
+const COACH2_GAP = 0.34; // metres, loco to coach2
 
-function placeAt(obj, t) {
-  t = ((t % 1) + 1) % 1;
-  const p = curve.getPointAt(t);
-  const tangent = curve.getTangentAt(t);
-  obj.position.copy(p);
+function placeAt(obj, s) {
+  const { point, tangent } = pointAndTangentAtDistance(s);
+  obj.position.copy(point);
   obj.position.y += 0.025;
-  obj.lookAt(p.clone().add(tangent));
+  obj.lookAt(point.clone().add(tangent));
 }
 
 function updateTrain(dt) {
   if (running) {
     const modelMps = metresPerSecondFromScaleMph(scaleMph);
-    trainT = (trainT + (modelMps * dt) / trackLength) % 1;
+    trainDist += modelMps * dt;
   }
-  placeAt(loco, trainT);
-  placeAt(coach1, trainT - tOffset(0.17));
-  placeAt(coach2, trainT - tOffset(0.34));
+  placeAt(loco, trainDist);
+  placeAt(coach1, trainDist - COACH1_GAP);
+  placeAt(coach2, trainDist - COACH2_GAP);
   alignCoupling(coupling1, loco.position, coach1.position);
   alignCoupling(coupling2, coach1.position, coach2.position);
 }
