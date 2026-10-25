@@ -111,6 +111,17 @@ Earlier kitchen sketches proved too ambiguous to place reliably (see "Kitchen un
 - **Explicitly decided against (2026-10-25)**: glass dining table + black chairs, red accent "Cone"-style chair — not to be added.
 - Not modelled, not yet decided either way: round mosaic mirror, gallery wall art (minor wall decoration).
 
+## Kitchen units, worktop, sink, hob, oven, microwave (2026-10-25)
+
+No photo shows the worktop or these four appliances specifically (only the fridge/freezer was photographed), so all of this section is geometry/placement built to look plausible rather than measured or photo-matched — flagged as ASSUMPTION in the `index.html` comments at each spot.
+
+- **Worktop cap**: every worktop-height cabinet run (left-wall cupboard, both kitchen-U legs, the base unit, the front-wall run, and the two doorway-side cupboards — not the fridge/freezer, which is taller and standalone) now has a thin stone-effect laminate cap (`worktopMat`, `addWorktopCap()`) with a small overhanging lip, instead of the units reading as flat-topped boxes.
+- **Sink**: a stainless basin + chrome mixer tap (`makeSink()`), inset into the worktop cap of the base unit — the unit already annotated in the code as "containing the sink". Tap mounted at the wall-side back of the basin.
+- **Hob**: a four-ring dark-glass hob (`makeHob()`), ASSUMPTION placement roughly a third of the way along the kitchen-U's first leg (`leg1`).
+- **Oven**: built under the worktop directly below the hob (`makeOven()`), set into the same leg, door facing into the walkway inside the U — a believable hob-over-oven "range" pairing, not a measured one.
+- **Microwave**: a white-gloss countertop microwave (`makeMicrowave()`, matches `unitMat`), placed on the front-wall-run worktop near the open end of the U.
+- New shared materials: `worktopMat` (worktop cap), `hobMat` (hob glass / oven window / microwave door), `chromeMat` (tap, hob rings, handles).
+
 ## Plan
 1. Living room in full detail: furniture and finishes, first loop routed clear of furniture, both views.
 2. Room builder and track builder (OO-gauge pieces, points, gradients, tunnels through walls).

@@ -257,6 +257,7 @@ scene.add(kitchenGroup, furnitureGroup);
 const UNIT_DEPTH = 0.6;      // standard worktop depth
 const WORKTOP_H = 0.9;       // standard worktop height
 const TALL_UNIT_H = 2.0;     // fridge / larder height
+const CAP_T = 0.04;          // worktop cap thickness
 
 // Room corners, named as in NOTES.md (x, z):
 const A = { x: -2.185, z: -4.455 }; // top-left (back-left of whole room)
@@ -275,6 +276,13 @@ const applianceMat = new THREE.MeshStandardMaterial({ color: 0xaeb2b5, roughness
 const sofaMat = new THREE.MeshStandardMaterial({ color: 0xede6d8, roughness: 0.35, metalness: 0.05 }); // white/cream leather sofa
 const bookcaseMat = new THREE.MeshStandardMaterial({ color: 0xf2f0ec, roughness: 0.55 }); // white bookcase
 const furnitureLegMat = new THREE.MeshStandardMaterial({ color: 0x33281f, roughness: 0.6 }); // dark feet/legs
+// ASSUMPTION (2026-10-25): no photo shows the worktop, sink, hob, oven or
+// microwave specifically — a light stone-effect laminate worktop and dark
+// glass/chrome appliance trim are a reasonable match for the white gloss
+// units, not confirmed against a photo. See NOTES.md.
+const worktopMat = new THREE.MeshStandardMaterial({ color: 0xdedad2, roughness: 0.25, metalness: 0.05 }); // worktop cap
+const hobMat = new THREE.MeshStandardMaterial({ color: 0x15151a, roughness: 0.15, metalness: 0.2 }); // hob glass / oven window / microwave door
+const chromeMat = new THREE.MeshStandardMaterial({ color: 0xc9cdd0, roughness: 0.15, metalness: 0.9 }); // tap, rings, handles
 
 function addBlock(parent, mat, w, h, d, cx, cy, cz) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -283,6 +291,97 @@ function addBlock(parent, mat, w, h, d, cx, cy, cz) {
   mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
+}
+
+// Thin worktop slab sitting on top of a worktop-height cabinet run, with a
+// small lip overhang on all sides. Takes the same (w, d, cx, cz) footprint
+// args already used for the cabinet box underneath, so every call site
+// just reuses its existing addBlock arguments.
+function addWorktopCap(parent, w, d, cx, cz) {
+  addBlock(parent, worktopMat, w + 0.04, CAP_T, d + 0.04, cx, WORKTOP_H + CAP_T / 2, cz);
+}
+
+// A stainless sink basin recessed into a worktop cap, plus a chrome mixer
+// tap at the back (wall side). Local origin sits ON the worktop surface,
+// centred on the counter footprint; local x runs wall side (-x) to open
+// room side (+x) — this run's wall is at the smaller-x side, matching
+// addBlock's own cx placement for this unit.
+function makeSink(width, depth) {
+  const g = new THREE.Group();
+  const BASIN_W = width * 0.85;
+  const BASIN_D = depth * 0.65;
+  const BASIN_DEEP = 0.16;
+  const basin = new THREE.Mesh(new THREE.BoxGeometry(BASIN_D, BASIN_DEEP, BASIN_W), applianceMat);
+  basin.position.set(0.03, -BASIN_DEEP / 2, 0);
+  g.add(basin);
+
+  const tapPost = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.22, 10), chromeMat);
+  tapPost.position.set(-(depth / 2 - 0.08), 0.11, 0);
+  g.add(tapPost);
+  const tapSpout = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.16, 10), chromeMat);
+  tapSpout.rotation.z = Math.PI / 2;
+  tapSpout.position.set(-(depth / 2 - 0.08 - 0.08), 0.21, 0);
+  g.add(tapSpout);
+
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+// Four-ring hob: dark glass panel + chrome burner rings, sitting flush on
+// a worktop cap. Local origin is on the worktop surface, centred on the
+// hob footprint.
+function makeHob() {
+  const g = new THREE.Group();
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.015, 0.50), hobMat);
+  panel.position.set(0, 0.0075, 0);
+  g.add(panel);
+  const ringGeo = new THREE.TorusGeometry(0.08, 0.006, 8, 24);
+  for (const [ox, oz] of [[-0.14, -0.14], [0.14, -0.14], [-0.14, 0.14], [0.14, 0.14]]) {
+    const ring = new THREE.Mesh(ringGeo, chromeMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(ox, 0.016, oz);
+    g.add(ring);
+  }
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+// Built-under oven: stainless body, dark glass door window, chrome handle.
+// Local origin is on its door face (the room/walkway-facing face of the
+// cabinet it's set into); the body sits behind (-z) that face.
+function makeOven() {
+  const g = new THREE.Group();
+  const W = 0.58, H = 0.58, D = 0.04;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), applianceMat);
+  body.position.set(0, 0, -D / 2);
+  g.add(body);
+  const win = new THREE.Mesh(new THREE.BoxGeometry(W * 0.65, H * 0.5, 0.01), hobMat);
+  win.position.set(0, -0.04, 0.005);
+  g.add(win);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(W * 0.8, 0.03, 0.03), chromeMat);
+  handle.position.set(0, H / 2 - 0.05, 0.02);
+  g.add(handle);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+// Countertop microwave: white gloss body (matches the units) with a dark
+// glass door and chrome handle facing -z. Local origin is on the worktop
+// surface, centred on the appliance footprint.
+function makeMicrowave() {
+  const g = new THREE.Group();
+  const W = 0.5, H = 0.30, D = 0.38;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), unitMat);
+  body.position.set(0, H / 2, 0);
+  g.add(body);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(W * 0.7, H * 0.7, 0.01), hobMat);
+  door.position.set(0.04, H / 2, -D / 2 - 0.006);
+  g.add(door);
+  const handle = new THREE.Mesh(new THREE.BoxGeometry(0.015, H * 0.6, 0.02), chromeMat);
+  handle.position.set(-W * 0.26, H / 2, -D / 2 - 0.01);
+  g.add(handle);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
 }
 
 // A settee modelled as a low seat platform + raised backrest along the
@@ -383,6 +482,7 @@ addBlock(
   UNIT_DEPTH, WORKTOP_H, 3.60,
   A.x + UNIT_DEPTH / 2, WORKTOP_H / 2, (cupboardStartZ + cupboardEndZ) / 2
 );
+addWorktopCap(kitchenGroup, UNIT_DEPTH, 3.60, A.x + UNIT_DEPTH / 2, (cupboardStartZ + cupboardEndZ) / 2);
 
 // --- Kitchen U: base (130cm, containing the sink) flush against the left
 // wall, with two 260cm legs projecting into the room (+X) from each end,
@@ -397,6 +497,21 @@ addBlock(
   legReachX - F.x, WORKTOP_H, UNIT_DEPTH,
   (F.x + legReachX) / 2, WORKTOP_H / 2, (leg1StartZ + leg1EndZ) / 2
 );
+addWorktopCap(kitchenGroup, legReachX - F.x, UNIT_DEPTH, (F.x + legReachX) / 2, (leg1StartZ + leg1EndZ) / 2);
+
+// Hob + built-under oven, set into leg1 (its front face is +z, facing the
+// walkway inside the U). ASSUMPTION (no photo reference): centred along
+// leg1's run, roughly a third of the way from the open end — a believable
+// hob-over-oven "range" position, not a measured one. See NOTES.md.
+const hobCenterX = legReachX - 0.9;
+const hobCenterZ = (leg1StartZ + leg1EndZ) / 2;
+const hob = makeHob();
+hob.position.set(hobCenterX, WORKTOP_H + CAP_T, hobCenterZ);
+kitchenGroup.add(hob);
+const oven = makeOven();
+oven.position.set(hobCenterX, 0.1 + 0.29, leg1EndZ);
+kitchenGroup.add(oven);
+
 const baseStartZ = leg1EndZ;
 const baseEndZ = baseStartZ + 1.30;          // base is 130cm long; ends exactly at F
 addBlock(
@@ -404,6 +519,13 @@ addBlock(
   UNIT_DEPTH, WORKTOP_H, 1.30,
   F.x + UNIT_DEPTH / 2, WORKTOP_H / 2, (baseStartZ + baseEndZ) / 2
 );
+addWorktopCap(kitchenGroup, UNIT_DEPTH, 1.30, F.x + UNIT_DEPTH / 2, (baseStartZ + baseEndZ) / 2);
+
+// Sink, inset into the base unit's worktop cap (the unit this run has
+// always been annotated as containing).
+const sink = makeSink(1.30, UNIT_DEPTH);
+sink.position.set(F.x + UNIT_DEPTH / 2, WORKTOP_H + CAP_T, (baseStartZ + baseEndZ) / 2);
+kitchenGroup.add(sink);
 
 // --- Front wall run (U's second leg): the entire E-F wall, 2.60m. ---
 addBlock(
@@ -411,6 +533,13 @@ addBlock(
   Math.abs(E.x - F.x), WORKTOP_H, UNIT_DEPTH,
   (E.x + F.x) / 2, WORKTOP_H / 2, F.z - UNIT_DEPTH / 2
 );
+addWorktopCap(kitchenGroup, Math.abs(E.x - F.x), UNIT_DEPTH, (E.x + F.x) / 2, F.z - UNIT_DEPTH / 2);
+
+// Countertop microwave, on the front-wall-run worktop near the open end
+// of the U. ASSUMPTION (no photo reference): placement only, not measured.
+const microwave = makeMicrowave();
+microwave.position.set(E.x - 0.45, WORKTOP_H + CAP_T, F.z - UNIT_DEPTH / 2);
+kitchenGroup.add(microwave);
 
 // --- Doorway-side cupboard/freezer/cupboard run, against the B-C wall ---
 // (the 891cm doorway->sofa wall). Sequence confirmed by direct sum in
@@ -418,18 +547,20 @@ addBlock(
 // + 15 + 35 = 891, walking from C (by the entrance) toward B.
 // ASSUMPTION: worktop height for all three (not stated as tall units).
 let cz = C.z - 1.0; // 100cm clear from the doorway corner
-function addWallUnit(parent, mat, lengthAlongWall, depth, height) {
+function addWallUnit(parent, mat, lengthAlongWall, depth, height, cap) {
   const startZ = cz;
   cz -= lengthAlongWall;
+  const centerZ = (startZ + cz) / 2;
   addBlock(
     parent, mat,
     depth, height, lengthAlongWall,
-    B.x /* C.x === B.x */ - depth / 2, height / 2, (startZ + cz) / 2
+    B.x /* C.x === B.x */ - depth / 2, height / 2, centerZ
   );
+  if (cap) addWorktopCap(parent, depth, lengthAlongWall, B.x - depth / 2, centerZ);
 }
-addWallUnit(kitchenGroup, unitMat, 0.84, UNIT_DEPTH, WORKTOP_H);       // cupboard
-addWallUnit(kitchenGroup, applianceMat, 1.03, UNIT_DEPTH, WORKTOP_H);  // fridge/freezer
-addWallUnit(kitchenGroup, unitMat, 0.84, UNIT_DEPTH, WORKTOP_H);       // cupboard
+addWallUnit(kitchenGroup, unitMat, 0.84, UNIT_DEPTH, WORKTOP_H, true);  // cupboard
+addWallUnit(kitchenGroup, applianceMat, 1.03, UNIT_DEPTH, WORKTOP_H);   // fridge/freezer — taller standalone appliance, no worktop cap
+addWallUnit(kitchenGroup, unitMat, 0.84, UNIT_DEPTH, WORKTOP_H, true);  // cupboard
 
 cz -= 1.70; // 170cm clear gap before the sofa
 
