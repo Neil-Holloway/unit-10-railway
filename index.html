@@ -625,18 +625,49 @@ function updateTrain(dt) {
   placeAt(coach2, trainDist - COACH2_GAP);
   alignCoupling(coupling1, loco.position, coach1.position);
   alignCoupling(coupling2, coach1.position, coach2.position);
+
+  // Child's-eye orbits the LOCO, not a fixed point: the loop is now ~21m
+  // round, so a static orbit point only has the train in view for a small
+  // fraction of each lap — from everywhere else it just looks like an
+  // empty track with no train "running" on it. Re-targeting the orbit
+  // controls at the loco's position every frame (rather than moving the
+  // camera itself) keeps whatever relative angle/distance the user has
+  // chosen by dragging — it becomes a chase cam you can still freely
+  // orbit around, not a fixed external shot.
+  childControls.target.set(loco.position.x, 0.12, loco.position.z);
+  childControls.update();
 }
 
 // ---------- Cameras ----------
-// Child's-eye: orbits the room, height clamped to 30-50cm off the floor.
-// Defaults to a point in the wide-open band in front of the kitchen/
-// doorway neck, looking along both lanes of the loop.
-childCamera.position.set(0, 0.4, 1.3);
+// Child's-eye: a chase cam, height clamped to 30-50cm off the floor,
+// orbiting the loco rather than a fixed point in the room (see
+// updateTrain() — childControls.target is re-set to the loco's position
+// every frame). loco/coach1/coach2 are still at their default (0,0,0)
+// group-local position at this point — childControls is created first
+// (updateTrain() reads it), then updateTrain(0) places the train on the
+// track and re-targets childControls at the loco's actual starting
+// point, and only then is the camera's starting offset computed from
+// that real position — otherwise the camera stayed near the origin
+// while the orbit target jumped to wherever the track starts, leaving
+// the loco a tiny, distant speck in frame on the first render.
 const childControls = new OrbitControls(childCamera, renderer.domElement);
-childControls.target.set(0, 0.1, -0.3);
 childControls.minDistance = 0.3;
 childControls.maxDistance = 4;
 childControls.maxPolarAngle = Math.PI * 0.49;
+updateTrain(0);
+// Trail behind the loco along the track's own direction of travel at its
+// starting point, not a fixed world-space diagonal offset — the loop's
+// start point is close to the south wall, and a fixed +x/+z offset
+// happened to push the camera straight through that wall (seen as a
+// screen-filling grey/wall-backface render). The track itself is always
+// clear of walls and furniture by design, so "behind the loco, along the
+// rails" is guaranteed to be open floor wherever the loop happens to
+// start.
+{
+  const { tangent } = pointAndTangentAtDistance(trainDist);
+  const behind = loco.position.clone().addScaledVector(tangent, -0.35);
+  childCamera.position.set(behind.x, 0.4, behind.z);
+}
 childControls.update();
 childControls.addEventListener('change', () => {
   childCamera.position.y = Math.min(0.5, Math.max(0.3, childCamera.position.y));
