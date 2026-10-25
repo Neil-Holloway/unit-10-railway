@@ -107,7 +107,9 @@ Earlier kitchen sketches proved too ambiguous to place reliably (see "Kitchen un
 - **Fridge/freezer**: Samsung stainless-steel American-style (side-by-side, water/ice dispenser) — modelled as a brushed-steel material on the existing placeholder box, not a new shape.
 - **Sofa**: white/cream leather L-shaped corner sofa with chaise, grey trellis-pattern and black/white patterned scatter cushions (cushions not modelled, colour of the sofa body only).
 - **Bookcase**: plain white (previously a placeholder wood-brown colour, `tableMat` renamed `bookcaseMat`).
-- Not yet modelled: white gloss sideboard/TV unit with silver bar handles, glass dining table + black chairs, red accent "Cone"-style chair, round mosaic mirror, gallery wall art — these aren't in the current furniture set at all (only kitchen U, doorway cupboard run, sofa, bookcase exist). Adding them is new geometry, not a materials-only pass — flagged for a future session if wanted.
+- **Sideboard/TV unit**: this is the existing 360cm low cupboard already modelled along the left wall (`kitchenGroup`, `cupboardStartZ`/`cupboardEndZ` in `index.html`) — not a separate piece. It already uses `unitMat` (white gloss), so no further change needed.
+- **Explicitly decided against (2026-10-25)**: glass dining table + black chairs, red accent "Cone"-style chair — not to be added.
+- Not modelled, not yet decided either way: round mosaic mirror, gallery wall art (minor wall decoration).
 
 ## Plan
 1. Living room in full detail: furniture and finishes, first loop routed clear of furniture, both views.
