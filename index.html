@@ -149,6 +149,8 @@ sun.castShadow = true;
 scene.add(sun);
 
 // ---------- Room shell: L-shaped floor + one wall per polygon edge ----------
+// Floor and wall finishes are matched from photos (flooring close-up,
+// wall close-up, 2026-10-25) — see NOTES.md "Floor and wall finishes".
 const floorShape = new THREE.Shape();
 ROOM_POLY.forEach(([x, z], i) => {
   // The shape plane becomes the floor once rotated -90° about X, which
@@ -158,15 +160,75 @@ ROOM_POLY.forEach(([x, z], i) => {
 });
 floorShape.closePath();
 
+// Procedural plank texture: pale grey-beige oak-effect boards, matched
+// from the flooring close-up photo. ShapeGeometry's auto-generated UVs
+// run 0-1 across the shape's own bounding box (u along world x, v along
+// world -z), so repeat counts here are derived directly from the real
+// room dimensions and the real plank width (confirmed from the photo:
+// "tiles are 19cm wide") rather than picked by eye. Plank LENGTH isn't
+// measured — 1.2m is a typical-board-length ASSUMPTION purely so the
+// end-joint seams drawn into the texture repeat at a plausible interval.
+function makeFloorTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#c9c3b7';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Subtle wood-grain streaks, randomly placed and shaded.
+  for (let i = 0; i < 400; i++) {
+    const x = Math.random() * canvas.width;
+    const y = Math.random() * canvas.height;
+    const len = 10 + Math.random() * 40;
+    ctx.strokeStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(80,70,55,0.06)';
+    ctx.lineWidth = 1 + Math.random();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + len * (Math.random() - 0.5) * 0.3, y + len);
+    ctx.stroke();
+  }
+
+  // Plank edge seam (long edge, repeats as the board width).
+  ctx.strokeStyle = 'rgba(60,52,40,0.35)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, canvas.height);
+  ctx.stroke();
+
+  // A few random end-to-end board joints along the plank's length.
+  ctx.strokeStyle = 'rgba(60,52,40,0.25)';
+  for (let i = 0; i < 3; i++) {
+    const y = Math.random() * canvas.height;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvas.width, y);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const PLANK_WIDTH = 0.19;  // metres — measured from the flooring photo
+  const PLANK_LENGTH = 1.2;  // metres — ASSUMPTION, not measured
+  texture.repeat.set(ROOM_BOUND_W / PLANK_WIDTH, ROOM_BOUND_D / PLANK_LENGTH);
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return texture;
+}
+
 const floor = new THREE.Mesh(
   new THREE.ShapeGeometry(floorShape),
-  new THREE.MeshStandardMaterial({ color: 0xb79c7a, roughness: 0.9, side: THREE.DoubleSide }) // placeholder wood finish
+  new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 0.85, side: THREE.DoubleSide })
 );
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
 
-const wallMat = new THREE.MeshStandardMaterial({ color: 0xf2efe9, roughness: 0.95, side: THREE.DoubleSide });
+// Wall colour: light warm greige, matched from the wall close-up photo.
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xd8d3c9, roughness: 0.95, side: THREE.DoubleSide });
 function addWall(p1, p2) {
   const length = wallLength(p1, p2);
   const vertical = Math.abs(p1[0] - p2[0]) < 1e-6; // edge runs along Z
@@ -204,10 +266,15 @@ const E = { x: 0.415, z: 2.655 };   // kitchen's front-right corner (front wall 
 const B = { x: 2.185, z: -4.455 };  // top-right
 const C = { x: 2.185, z: 4.455 };   // bottom-right, by the entrance
 
-const unitMat = new THREE.MeshStandardMaterial({ color: 0xe4e1da, roughness: 0.7 });
-const applianceMat = new THREE.MeshStandardMaterial({ color: 0xc9cdd1, roughness: 0.4, metalness: 0.3 });
-const sofaMat = new THREE.MeshStandardMaterial({ color: 0x5b6b7a, roughness: 0.8 });
-const tableMat = new THREE.MeshStandardMaterial({ color: 0x6b4a33, roughness: 0.6 });
+// Materials matched from furniture photos (2026-10-25) — see NOTES.md
+// "Floor and wall finishes". Real kitchen units are white gloss, the
+// fridge/freezer is a Samsung stainless-steel American-style model, the
+// sofa is a white/cream leather L-shaped corner sofa, and the bookcase
+// is plain white — all previously placeholder colours.
+const unitMat = new THREE.MeshStandardMaterial({ color: 0xf2f1ee, roughness: 0.15, metalness: 0.05 }); // white gloss kitchen units
+const applianceMat = new THREE.MeshStandardMaterial({ color: 0xaeb2b5, roughness: 0.3, metalness: 0.75 }); // stainless-steel fridge/freezer
+const sofaMat = new THREE.MeshStandardMaterial({ color: 0xede6d8, roughness: 0.35, metalness: 0.05 }); // white/cream leather sofa
+const bookcaseMat = new THREE.MeshStandardMaterial({ color: 0xf2f0ec, roughness: 0.55 }); // white bookcase
 
 function addBlock(parent, mat, w, h, d, cx, cy, cz) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -296,7 +363,7 @@ addWallUnit(furnitureGroup, sofaMat, 2.10, 1.08, SOFA_H);  // main piece
 // NOTES.md rather than silently forcing an exact match.
 const BOOKCASE_H = 1.8; // ASSUMPTION — typical bookcase height, not measured
 addBlock(
-  furnitureGroup, tableMat,
+  furnitureGroup, bookcaseMat,
   1.20, BOOKCASE_H, 0.35,
   B.x - 1.20 / 2, BOOKCASE_H / 2, A.z + 0.35 / 2
 );

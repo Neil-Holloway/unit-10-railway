@@ -99,6 +99,16 @@ Earlier kitchen sketches proved too ambiguous to place reliably (see "Kitchen un
 - **3D model note**: the bookcase was placed flush against the top wall (more physically plausible than floating it off the wall by a gap). With the sofa's position anchored from the doorway/cupboard side (well-confirmed, see sum above), this leaves a computed ~15cm gap to the sofa rather than the stated 25cm — a ~10cm discrepancy, within hand-measurement tolerance given the 891cm wall itself summed to 901cm using all the individual pieces including this gap. Not treated as an error requiring rework.
 - Sketch also shows extra sofa step detail (108 / 20 / 90 / 195 near the top of the sofa run) beyond the already-modelled two-box L-shape — **not yet clear whether this refines the existing shape or is redundant with it**; treating the existing simplified two-box sofa as good enough for now unless told otherwise.
 
+## Floor and wall finishes (from photos, 2026-10-25)
+
+- **Floor**: pale grey-beige oak-effect plank flooring, 19cm plank width (measured from photo). Modelled as a procedural canvas texture (`makeFloorTexture()` in `index.html`) tiled at the real 19cm width; plank length (1.2m) is an ASSUMPTION, not measured — only affects where the drawn end-joint seams repeat, not the overall look.
+- **Walls**: light warm greige paint, flat/matte.
+- **Kitchen units**: white gloss.
+- **Fridge/freezer**: Samsung stainless-steel American-style (side-by-side, water/ice dispenser) — modelled as a brushed-steel material on the existing placeholder box, not a new shape.
+- **Sofa**: white/cream leather L-shaped corner sofa with chaise, grey trellis-pattern and black/white patterned scatter cushions (cushions not modelled, colour of the sofa body only).
+- **Bookcase**: plain white (previously a placeholder wood-brown colour, `tableMat` renamed `bookcaseMat`).
+- Not yet modelled: white gloss sideboard/TV unit with silver bar handles, glass dining table + black chairs, red accent "Cone"-style chair, round mosaic mirror, gallery wall art — these aren't in the current furniture set at all (only kitchen U, doorway cupboard run, sofa, bookcase exist). Adding them is new geometry, not a materials-only pass — flagged for a future session if wanted.
+
 ## Plan
 1. Living room in full detail: furniture and finishes, first loop routed clear of furniture, both views.
 2. Room builder and track builder (OO-gauge pieces, points, gradients, tunnels through walls).
