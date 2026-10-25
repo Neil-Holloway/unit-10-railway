@@ -104,3 +104,30 @@ Earlier kitchen sketches proved too ambiguous to place reliably (see "Kitchen un
 2. Room builder and track builder (OO-gauge pieces, points, gradients, tunnels through walls).
 3. Sign-in, saving and a gallery of public layouts (Supabase), deployed on Netlify from GitHub.
 4. Extend the track through the rest of the flat.
+
+## Feature roadmap (2026-10-25)
+
+Ten further ideas were discussed and assessed for feasibility. The core architectural fact driving the sequencing: everything today assumes **one closed track loop** (a single `curve` + shared arc-length table, see `pointAndTangentAtDistance()` in `index.html`) and **one train** (`trainDist`, hard-coded `loco`/`coach1`/`coach2`). Several ideas fit inside that model as-is; others (points, signals, sidings, bridges, branching) need that replaced with a **track graph** (nodes/edges, junction choices) — the one genuine architecture rewrite in this list. Sequencing avoids doing that rewrite twice.
+
+**Phase A — visual/polish (no architecture changes, independent of each other, can start any time):**
+- Realistic walls/floor/furniture finishes, from photos (settee should look like a settee, not a blob) — textures + more detailed furniture geometry, same technique already used for the loco/coach rebuild.
+- More realistic train/carriage models (push further than the current boiler/cab/chimney build).
+- Scenery: trees, lakes, rivers etc. — more decorative meshes.
+- Train sound — Web Audio API, loop pitch/volume tied to speed; must start on first user click (browser autoplay restriction).
+- **Engine driver view** — a third camera mode, rigid (not orbiting) to the loco's own position/heading, mounted in the cab, facing forward along the same tangent `placeAt()` already computes. Needs the loco's own body hidden/culled while this camera is active (no interior modelled — camera would see inside faces of the boiler/cab otherwise). Wider FOV (~75-80°) than the chase cam's 60° so the tight OO-gauge curves read well through the "windscreen". Build it to follow "whichever train is selected", not hard-coded to `loco`, so it doesn't need rework once multi-train (Phase B) lands. Mouse-look and speed-tied bob/sway are nice-to-have v2 polish, not needed for v1.
+
+**Phase B — multi-train (generalise `trainDist` into a list of trains, still one loop, no graph needed):**
+- More than one train on the circuit, each with its own speed and type (e.g. steam vs electric — different models, pairs naturally with the train-realism polish above).
+- Catch-up behaviour: a following train caps its speed to maintain a minimum gap to whichever train is ahead of it on the same loop.
+- Basic stations/schedules: named stop-points along the loop, pause-for-N-seconds logic — works fine on a single loop, no routing decisions needed yet.
+
+**Phase C — track graph rework (the big pivot; everything below depends on this):**
+- Points, signals, a second track, bridges (mostly visual), gradients (track going up/down isn't supported at all yet). Track becomes nodes + edges; trains choose a route at junctions instead of following one fixed loop.
+
+**Phase D — built on the graph (after Phase C):**
+- Overtake siding: a side route a faster train can use to pass a slower one.
+- Full scheduling: different trains stopping at different named stations, not just pause-points on one loop.
+- Tunnels through furniture (cupboards, under the bed etc.) — visual treatment + routing, same bucket as the hall/bedroom extension below.
+
+**Phase E — flat expansion:**
+- Extend track into the hall and both bedrooms. Partly blocked: bedroom sizes aren't measured yet (hall width 1.4m and ceiling height 2.28m are already in NOTES.md, bedroom dimensions still needed). Can be done as a simple loop extension (no graph required) if it stays one line, or combined with Phase C if a junction is wanted where the hall meets the living room.

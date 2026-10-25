@@ -608,11 +608,30 @@ function metresPerSecondFromScaleMph(mph) {
 const COACH1_GAP = 0.17; // metres, loco to coach1
 const COACH2_GAP = 0.34; // metres, loco to coach2
 
-function placeAt(obj, s) {
-  const { point, tangent } = pointAndTangentAtDistance(s);
-  obj.position.copy(point);
-  obj.position.y += 0.025;
-  obj.lookAt(point.clone().add(tangent));
+// Vehicles are positioned from their two wheelbase pivot points sampled
+// along the track (front and back), not a single centre point + tangent.
+// A single-pivot placement orients the whole rigid body from one sample,
+// which swings the body's ENDS outward past the rails on tight curves —
+// most visible on the coaches (13cm long) going round the 0.25m-radius
+// end turns, where it read as the train sitting "about a track width"
+// off the rails. Sampling the actual track position at each end instead
+// means the body's ends always sit exactly on the centreline; only the
+// body's midpoint tucks in very slightly on a curve (the same way a real
+// bogie vehicle's centre draws in on a bend) — much smaller and reads as
+// normal rigid-vehicle behaviour instead of the vehicle floating off the
+// track.
+const LOCO_HALF_LEN = 0.0525;  // footplate depth / 2
+const COACH_HALF_LEN = 0.065;  // coach body depth / 2
+
+function placeAt(obj, s, halfLen) {
+  const front = pointAndTangentAtDistance(s + halfLen).point;
+  const back = pointAndTangentAtDistance(s - halfLen).point;
+  const mid = front.clone().add(back).multiplyScalar(0.5);
+  mid.y += 0.025;
+  obj.position.copy(mid);
+  const lookTarget = front.clone();
+  lookTarget.y += 0.025;
+  obj.lookAt(lookTarget);
 }
 
 function updateTrain(dt) {
@@ -620,9 +639,9 @@ function updateTrain(dt) {
     const modelMps = metresPerSecondFromScaleMph(scaleMph);
     trainDist += modelMps * dt;
   }
-  placeAt(loco, trainDist);
-  placeAt(coach1, trainDist - COACH1_GAP);
-  placeAt(coach2, trainDist - COACH2_GAP);
+  placeAt(loco, trainDist, LOCO_HALF_LEN);
+  placeAt(coach1, trainDist - COACH1_GAP, COACH_HALF_LEN);
+  placeAt(coach2, trainDist - COACH2_GAP, COACH_HALF_LEN);
   alignCoupling(coupling1, loco.position, coach1.position);
   alignCoupling(coupling2, coach1.position, coach2.position);
 
