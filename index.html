@@ -257,7 +257,6 @@ scene.add(kitchenGroup, furnitureGroup);
 const UNIT_DEPTH = 0.6;      // standard worktop depth
 const WORKTOP_H = 0.9;       // standard worktop height
 const TALL_UNIT_H = 2.0;     // fridge / larder height
-const SOFA_H = 0.8;          // ASSUMPTION — typical sofa back height, not measured
 
 // Room corners, named as in NOTES.md (x, z):
 const A = { x: -2.185, z: -4.455 }; // top-left (back-left of whole room)
@@ -275,6 +274,7 @@ const unitMat = new THREE.MeshStandardMaterial({ color: 0xf2f1ee, roughness: 0.1
 const applianceMat = new THREE.MeshStandardMaterial({ color: 0xaeb2b5, roughness: 0.3, metalness: 0.75 }); // stainless-steel fridge/freezer
 const sofaMat = new THREE.MeshStandardMaterial({ color: 0xede6d8, roughness: 0.35, metalness: 0.05 }); // white/cream leather sofa
 const bookcaseMat = new THREE.MeshStandardMaterial({ color: 0xf2f0ec, roughness: 0.55 }); // white bookcase
+const furnitureLegMat = new THREE.MeshStandardMaterial({ color: 0x33281f, roughness: 0.6 }); // dark feet/legs
 
 function addBlock(parent, mat, w, h, d, cx, cy, cz) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -283,6 +283,91 @@ function addBlock(parent, mat, w, h, d, cx, cy, cz) {
   mesh.receiveShadow = true;
   parent.add(mesh);
   return mesh;
+}
+
+// A settee modelled as a low seat platform + raised backrest along the
+// wall side + armrest blocks at its free (non-joining) ends + small
+// feet lifting it off the floor — a single solid box at "sofa height"
+// read as a flat slab/blob rather than a recognisable settee. Local
+// axes: z runs along the wall (the piece's length), x runs from the
+// open room-facing front (-depth/2) to the wall-backed rear (+depth/2);
+// this matches how addBlock's (w=depth, h, d=lengthAlongWall) boxes
+// were already oriented, so swapping this in needs no change to the
+// wall-sequencing placement code below.
+function makeSofaUnit(mat, length, depth, arms) {
+  const g = new THREE.Group();
+  const LEG_H = 0.08;
+  const SEAT_TOP = 0.40;
+  const BACK_TOP = 0.82;
+  const BACK_THICK = 0.16;
+  const ARM_W = 0.18;
+  const ARM_TOP = 0.60;
+
+  const seatDepth = depth - BACK_THICK;
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(seatDepth, SEAT_TOP - LEG_H, length), mat);
+  seat.position.set(-BACK_THICK / 2, LEG_H + (SEAT_TOP - LEG_H) / 2, 0);
+  g.add(seat);
+
+  const legGeo = new THREE.BoxGeometry(0.04, LEG_H, 0.04);
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const foot = new THREE.Mesh(legGeo, furnitureLegMat);
+      foot.position.set(-BACK_THICK / 2 + sx * (seatDepth / 2 - 0.05), LEG_H / 2, sz * (length / 2 - 0.08));
+      g.add(foot);
+    }
+  }
+
+  const back = new THREE.Mesh(new THREE.BoxGeometry(BACK_THICK, BACK_TOP - SEAT_TOP, length), mat);
+  back.position.set(depth / 2 - BACK_THICK / 2, SEAT_TOP + (BACK_TOP - SEAT_TOP) / 2, 0);
+  g.add(back);
+
+  // arms.armStart = armrest at local z = +length/2 (the end nearer
+  // whatever was placed immediately BEFORE this piece along the wall);
+  // arms.armEnd = armrest at local z = -length/2 (the end nearer
+  // whatever comes immediately AFTER). Only the free/open ends of the
+  // L-shape get an armrest — the inner corner where the chaise and main
+  // piece join has none, matching the real sofa.
+  if (arms.armStart) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(depth, ARM_TOP - LEG_H, ARM_W), mat);
+    arm.position.set(0, LEG_H + (ARM_TOP - LEG_H) / 2, length / 2 - ARM_W / 2);
+    g.add(arm);
+  }
+  if (arms.armEnd) {
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(depth, ARM_TOP - LEG_H, ARM_W), mat);
+    arm.position.set(0, LEG_H + (ARM_TOP - LEG_H) / 2, -(length / 2 - ARM_W / 2));
+    g.add(arm);
+  }
+
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+// A bookcase modelled as open shelving (two sides + back panel + shelf
+// boards) rather than a solid box — the real bookcase (photo) is an
+// open cube-shelf unit, not a closed cabinet.
+function makeBookcase(mat, w, h, d) {
+  const g = new THREE.Group();
+  const SIDE_T = 0.025;
+  const SHELF_T = 0.02;
+  const SHELVES = 4; // number of shelf boards -> 3 open compartments + base/top
+
+  for (const sx of [-1, 1]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(SIDE_T, h, d), mat);
+    side.position.set(sx * (w / 2 - SIDE_T / 2), h / 2, 0);
+    g.add(side);
+  }
+  const back = new THREE.Mesh(new THREE.BoxGeometry(w - SIDE_T * 2, h, 0.01), mat);
+  back.position.set(0, h / 2, -d / 2 + 0.005);
+  g.add(back);
+  for (let i = 0; i <= SHELVES; i++) {
+    const y = Math.min((h / SHELVES) * i, h - SHELF_T / 2);
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(w - SIDE_T * 2, SHELF_T, d), mat);
+    shelf.position.set(0, y, 0);
+    g.add(shelf);
+  }
+
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
 }
 
 // --- Left-wall cupboard: 360cm, low (worktop height, not a tall tower —
@@ -351,8 +436,19 @@ cz -= 1.70; // 170cm clear gap before the sofa
 // --- L-shaped sofa, 300cm total along the wall ---
 // Chaise (90 x 195, projecting further into the room) nearest the
 // cupboards, main piece (210 x 108) continuing toward B/the bookcase.
-addWallUnit(furnitureGroup, sofaMat, 0.90, 1.95, SOFA_H);  // chaise, projects deeper into the room
-addWallUnit(furnitureGroup, sofaMat, 2.10, 1.08, SOFA_H);  // main piece
+// Each piece is real settee geometry (makeSofaUnit), not a flat box —
+// placed with the same wall-sequencing bookkeeping addWallUnit uses
+// (startZ/cz), but via its own group builder since it needs armrests
+// only at the free ends (see makeSofaUnit's arms.armStart/armEnd note).
+function placeSofaPiece(lengthAlongWall, depth, arms) {
+  const startZ = cz;
+  cz -= lengthAlongWall;
+  const group = makeSofaUnit(sofaMat, lengthAlongWall, depth, arms);
+  group.position.set(B.x - depth / 2, 0, (startZ + cz) / 2);
+  furnitureGroup.add(group);
+}
+placeSofaPiece(0.90, 1.95, { armStart: true, armEnd: false });  // chaise — free end nearest the cupboards
+placeSofaPiece(2.10, 1.08, { armStart: false, armEnd: true });  // main piece — free end nearest the bookcase
 
 // --- Bookcase: 120 x 35cm, at right angles to the sofa in the top-right
 // corner (where the right wall meets the top wall), flush against the
@@ -362,11 +458,9 @@ addWallUnit(furnitureGroup, sofaMat, 2.10, 1.08, SOFA_H);  // main piece
 // the ~10cm discrepancy is within hand-measurement tolerance; flagged in
 // NOTES.md rather than silently forcing an exact match.
 const BOOKCASE_H = 1.8; // ASSUMPTION — typical bookcase height, not measured
-addBlock(
-  furnitureGroup, bookcaseMat,
-  1.20, BOOKCASE_H, 0.35,
-  B.x - 1.20 / 2, BOOKCASE_H / 2, A.z + 0.35 / 2
-);
+const bookcase = makeBookcase(bookcaseMat, 1.20, BOOKCASE_H, 0.35);
+bookcase.position.set(B.x - 1.20 / 2, 0, A.z + 0.35 / 2);
+furnitureGroup.add(bookcase);
 
 // ---------- Track: perimeter loop ----------
 // Second iteration: instead of a compact oval sitting in the middle of the
