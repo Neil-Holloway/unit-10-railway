@@ -42,6 +42,7 @@
     <button id="viewChild" class="active">Child's-eye view</button>
     <button id="viewBird">Bird's-eye view</button>
     <button id="viewScan">Real scan view</button>
+    <button id="viewHall">Hall</button>
   </div>
   <div id="scanStatus" style="margin-top: 6px; font-size: 12px; opacity: 0.8;"></div>
   <div style="margin-top: 8px;">
@@ -124,10 +125,16 @@ const childCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.i
 // square/portrait windows, making the view look zoomed into one corner.
 const BIRD_VIEW_MARGIN = 1.15; // 15% padding around the room on all sides
 const birdCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 50);
+// Swapped between the living room's and the hall's own bounding box when
+// the "Hall" button toggles rooms (see HALL_BOUND_W/D below), so the
+// bird's-eye frustum reframes to whichever room is currently shown instead
+// of staying sized for the (much bigger) living room.
+let currentBoundW = ROOM_BOUND_W;
+let currentBoundD = ROOM_BOUND_D;
 function updateBirdFrustum() {
   const aspect = window.innerWidth / window.innerHeight;
-  const neededHalfX = (ROOM_BOUND_W / 2) * BIRD_VIEW_MARGIN;
-  const neededHalfZ = (ROOM_BOUND_D / 2) * BIRD_VIEW_MARGIN;
+  const neededHalfX = (currentBoundW / 2) * BIRD_VIEW_MARGIN;
+  const neededHalfZ = (currentBoundD / 2) * BIRD_VIEW_MARGIN;
   let halfZ = neededHalfZ;
   let halfX = halfZ * aspect;
   if (halfX < neededHalfX) {
@@ -229,6 +236,83 @@ function loadScanIfNeeded() {
     (err) => {
       scanLoading = false;
       scanStatusEl.textContent = 'Failed to load real scan.';
+      console.error(err);
+    }
+  );
+}
+
+// ---------- Real hall scan (second room) ----------
+// Unlike the lounge/kitchen (built by hand from sketches/measurements, with
+// the lounge GLB kept only as an untrusted, severely drift-distorted
+// backdrop — see the lounge's own per-mesh bounding-box check in NOTES.md),
+// the hall is modelled DIRECTLY from its own real scan: a careful,
+// doors-closed, closed-loop capture whose bounding box and per-chunk floor
+// heights check out as clean (mildly oversized vs the tape measurement,
+// consistent with the scan reading into door recesses, not drift). The
+// alignment below is a full rotation (not a mirror) derived by PCA on the
+// scan's own floor-height point cloud: HALL_ANGLE is the principal-axis
+// angle, HALL_CENTER is the floor point cloud's centroid (x,z), and
+// HALL_FLOOR_Y is the dominant floor-height histogram bin. Because
+// three.js's rotation.y convention matches the PCA (u,v) projection formula
+// exactly, applying this single rotation+translation to the scan maps it
+// directly into a world frame where the floor is at y=0, the room's centre
+// is at the origin, and world x/z ARE the PCA long/short axes (u,v) —
+// so track waypoints below can be written as plain (x,z) metres, exactly
+// like the living room's TRACK_WAYPOINTS.
+const HALL_FLOOR_Y = -1.57;
+const HALL_CENTER = { x: -0.07255600814664044, z: 0.012245417515271695 };
+const HALL_ANGLE = -1.5446548533802604;
+// Fitted rectangle from the same PCA pass: long axis (world x) ~4.78m,
+// short axis (world z) ~1.51m — used only for bird's-eye camera framing.
+const HALL_BOUND_W = 4.78;
+const HALL_BOUND_D = 1.51;
+
+const scanHallGroup = new THREE.Group();
+scanHallGroup.rotation.y = HALL_ANGLE;
+scanHallGroup.position.copy(
+  new THREE.Vector3(-HALL_CENTER.x, -HALL_FLOOR_Y, -HALL_CENTER.z).applyAxisAngle(new THREE.Vector3(0, 1, 0), HALL_ANGLE)
+);
+scanHallGroup.visible = false;
+scene.add(scanHallGroup);
+
+let hallScanLoaded = false;
+let hallScanLoading = false;
+
+function loadHallScanIfNeeded() {
+  if (hallScanLoaded || hallScanLoading) return;
+  hallScanLoading = true;
+  scanStatusEl.textContent = 'Loading hall scan…';
+  const loader = new GLTFLoader();
+  loader.load(
+    'scans/hall-scan.glb',
+    (gltf) => {
+      const model = gltf.scene;
+      scanHallGroup.add(model);
+      // Same unlit treatment as the lounge scan — the capture's textures
+      // are already baked/lit, so re-lighting them with the scene's own
+      // lights would double up/wash out the real captured colour.
+      model.traverse((o) => {
+        if (o.isMesh && o.material) {
+          const old = o.material;
+          o.material = new THREE.MeshBasicMaterial({
+            map: old.map || null,
+            vertexColors: old.vertexColors || false,
+            color: old.map ? 0xffffff : (old.color || 0xffffff),
+          });
+        }
+      });
+      hallScanLoaded = true;
+      hallScanLoading = false;
+      scanStatusEl.textContent = 'Hall scan loaded.';
+    },
+    (xhr) => {
+      if (xhr.total) {
+        scanStatusEl.textContent = `Loading hall scan… ${(xhr.loaded / xhr.total * 100).toFixed(0)}%`;
+      }
+    },
+    (err) => {
+      hallScanLoading = false;
+      scanStatusEl.textContent = 'Failed to load hall scan.';
       console.error(err);
     }
   );
@@ -854,55 +938,63 @@ const TRACK_WAYPOINTS = [
 // points — the waypoints above are wildly uneven (tight arc points ~3cm
 // apart vs straight runs ~1m apart), and uniform Catmull-Rom overshoots/
 // loops in exactly that situation, right at the dense/sparse transitions.
-const centreline = TRACK_WAYPOINTS.map(([x, z]) => new THREE.Vector3(x, TRACK_HEIGHT, z));
-const curve = new THREE.CatmullRomCurve3(centreline, true, 'centripetal', 0.0);
-
-// Everything that needs a point-on-the-track (rails, sleepers and train
-// motion) reads from ONE shared, high-resolution arc-length table built
-// below, rather than each calling curve.getPointAt()/getTangentAt()
-// independently. Those methods invert their own lower-resolution internal
-// lookup table (default 200 divisions, built from uniform-t sampling),
-// which isn't precise enough across a ~15-20m loop mixing 3cm-tight turns
-// with 1m-long straights — small inversion errors there were (a) making
-// the train's speed visibly uneven frame to frame (jerk: measured up to a
-// 57% step-distance swing before this fix), and (b) letting the rails
-// themselves (previously re-fitted through a SECOND, separate Catmull-Rom
-// curve built from offset points) diverge slightly from the train's
-// actual path on the tight turns, which is what read as the train
-// "leaving the track". Building our own table once, directly from raw
-// curve.getPoint(t) samples, and having every consumer do simple
-// distance-based lookups into it removes both problems at the source.
+//
+// buildTrackSystem() turns a flat [x,z] waypoint array into everything
+// that needs a point-on-the-track (rails, sleepers and train motion) via
+// ONE shared, high-resolution arc-length table, rather than each consumer
+// calling curve.getPointAt()/getTangentAt() independently. Those methods
+// invert their own lower-resolution internal lookup table (default 200
+// divisions, built from uniform-t sampling), which isn't precise enough
+// across a ~15-20m loop mixing 3cm-tight turns with 1m-long straights —
+// small inversion errors there were (a) making the train's speed visibly
+// uneven frame to frame (jerk: measured up to a 57% step-distance swing
+// before this fix), and (b) letting the rails themselves (previously
+// re-fitted through a SECOND, separate Catmull-Rom curve built from offset
+// points) diverge slightly from the train's actual path on the tight
+// turns, which is what read as the train "leaving the track". Building our
+// own table once, directly from raw curve.getPoint(t) samples, and having
+// every consumer do simple distance-based lookups into it removes both
+// problems at the source. Factored out (rather than one set of module-level
+// consts) so the hall's independent oval can share the exact same, already
+// bug-fixed machinery as the living room's loop.
 const TRACK_SAMPLES = 6000;
-const trackPts = [];
-for (let i = 0; i <= TRACK_SAMPLES; i++) trackPts.push(curve.getPoint(i / TRACK_SAMPLES));
-const trackDist = [0];
-for (let i = 1; i < trackPts.length; i++) trackDist.push(trackDist[i - 1] + trackPts[i].distanceTo(trackPts[i - 1]));
-const trackLength = trackDist[trackDist.length - 1];
+function buildTrackSystem(waypoints) {
+  const centreline = waypoints.map(([x, z]) => new THREE.Vector3(x, TRACK_HEIGHT, z));
+  const curve = new THREE.CatmullRomCurve3(centreline, true, 'centripetal', 0.0);
 
-// Binary-search trackDist for the two samples bracketing arc-length s,
-// then linearly interpolate position and (from the same two samples)
-// direction of travel — accurate to within a single sample's distance
-// (~trackLength/6000, a few mm), far finer than anything visible.
-function pointAndTangentAtDistance(s) {
-  s = ((s % trackLength) + trackLength) % trackLength;
-  let lo = 0, hi = trackDist.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (trackDist[mid] <= s) lo = mid; else hi = mid;
+  const trackPts = [];
+  for (let i = 0; i <= TRACK_SAMPLES; i++) trackPts.push(curve.getPoint(i / TRACK_SAMPLES));
+  const trackDist = [0];
+  for (let i = 1; i < trackPts.length; i++) trackDist.push(trackDist[i - 1] + trackPts[i].distanceTo(trackPts[i - 1]));
+  const trackLength = trackDist[trackDist.length - 1];
+
+  // Binary-search trackDist for the two samples bracketing arc-length s,
+  // then linearly interpolate position and (from the same two samples)
+  // direction of travel — accurate to within a single sample's distance
+  // (~trackLength/6000, a few mm), far finer than anything visible.
+  function pointAndTangentAtDistance(s) {
+    s = ((s % trackLength) + trackLength) % trackLength;
+    let lo = 0, hi = trackDist.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (trackDist[mid] <= s) lo = mid; else hi = mid;
+    }
+    const segLen = trackDist[hi] - trackDist[lo];
+    const frac = segLen > 0 ? (s - trackDist[lo]) / segLen : 0;
+    const point = trackPts[lo].clone().lerp(trackPts[hi], frac);
+    const tangent = trackPts[hi].clone().sub(trackPts[lo]).normalize();
+    return { point, tangent };
   }
-  const segLen = trackDist[hi] - trackDist[lo];
-  const frac = segLen > 0 ? (s - trackDist[lo]) / segLen : 0;
-  const point = trackPts[lo].clone().lerp(trackPts[hi], frac);
-  const tangent = trackPts[hi].clone().sub(trackPts[lo]).normalize();
-  return { point, tangent };
+
+  return { curve, trackPts, trackDist, trackLength, pointAndTangentAtDistance };
 }
 
-function buildRail(offset) {
+function buildRail(trackSystem, offset) {
   const divisions = TRACK_SAMPLES;
   const pts = [];
   for (let i = 0; i <= divisions; i++) {
-    const s = (i / divisions) * trackLength;
-    const { point, tangent } = pointAndTangentAtDistance(s);
+    const s = (i / divisions) * trackSystem.trackLength;
+    const { point, tangent } = trackSystem.pointAndTangentAtDistance(s);
     const side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
     pts.push(point.addScaledVector(side, offset));
   }
@@ -913,24 +1005,69 @@ function buildRail(offset) {
 }
 
 const railMat = new THREE.MeshStandardMaterial({ color: 0x8a8d90, metalness: 0.6, roughness: 0.4 });
-const railL = new THREE.Mesh(buildRail(GAUGE / 2), railMat);
-const railR = new THREE.Mesh(buildRail(-GAUGE / 2), railMat);
-railL.castShadow = true;
-railR.castShadow = true;
-trackGroup.add(railL, railR);
-
 const sleeperMat = new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 1 });
 const sleeperGeo = new THREE.BoxGeometry(GAUGE * 2.2, 0.0015, 0.012);
 const SLEEPER_COUNT = 260;
-for (let i = 0; i < SLEEPER_COUNT; i++) {
-  const s = (i / SLEEPER_COUNT) * trackLength;
-  const { point, tangent } = pointAndTangentAtDistance(s);
-  const sleeper = new THREE.Mesh(sleeperGeo, sleeperMat);
-  sleeper.position.copy(point);
-  sleeper.position.y -= 0.0018;
-  sleeper.lookAt(point.clone().add(tangent));
-  trackGroup.add(sleeper);
+
+// Builds rail + sleeper meshes for a track system straight into the given
+// group — used for both the living room's loop and the hall's oval.
+function buildTrackMeshes(trackSystem, group) {
+  const railL = new THREE.Mesh(buildRail(trackSystem, GAUGE / 2), railMat);
+  const railR = new THREE.Mesh(buildRail(trackSystem, -GAUGE / 2), railMat);
+  railL.castShadow = true;
+  railR.castShadow = true;
+  group.add(railL, railR);
+
+  for (let i = 0; i < SLEEPER_COUNT; i++) {
+    const s = (i / SLEEPER_COUNT) * trackSystem.trackLength;
+    const { point, tangent } = trackSystem.pointAndTangentAtDistance(s);
+    const sleeper = new THREE.Mesh(sleeperGeo, sleeperMat);
+    sleeper.position.copy(point);
+    sleeper.position.y -= 0.0018;
+    sleeper.lookAt(point.clone().add(tangent));
+    group.add(sleeper);
+  }
 }
+
+const livingRoomTrack = buildTrackSystem(TRACK_WAYPOINTS);
+buildTrackMeshes(livingRoomTrack, trackGroup);
+
+// ---------- Hall: simple single oval ----------
+// Unlike the living room's dual-lane loop (which has to weave past real
+// furniture), the hall is an open rectangular corridor once the doors are
+// closed, so a simple single-track oval fits with no obstacles to route
+// around. radius/centreline/arc-centre values below were validated by
+// sampling 301 points round this exact curve and raycasting each straight
+// down against the real hall scan mesh: 0 points came back off the real
+// floor height or missed the mesh entirely. Coordinates are in the hall's
+// own aligned (x=u long axis, z=v short axis) world frame established by
+// scanHallGroup above — real usable corridor width through the core of the
+// hall is a stable ~1.28-1.38m (narrower, erratic readings only right at
+// the two doorway-reveal ends), comfortably clearing this oval's v range
+// of roughly -0.30 to 0.40.
+const HALL_TURN_RADIUS = 0.35;
+const HALL_CENTRELINE_V = 0.05;
+const HALL_WEST_TURN_U = -1.0;
+const HALL_EAST_TURN_U = 0.6;
+const HALL_TRACK_WAYPOINTS = [
+  ...arcPoints(HALL_EAST_TURN_U, HALL_CENTRELINE_V, HALL_TURN_RADIUS, -90, 90, TURN_SEGS),
+  [-0.2, HALL_CENTRELINE_V + HALL_TURN_RADIUS], // top straight midpoint
+  ...arcPoints(HALL_WEST_TURN_U, HALL_CENTRELINE_V, HALL_TURN_RADIUS, 90, 270, TURN_SEGS),
+  [-0.2, HALL_CENTRELINE_V - HALL_TURN_RADIUS], // bottom straight midpoint
+];
+
+const hallTrackGroup = new THREE.Group();
+hallTrackGroup.visible = false;
+scene.add(hallTrackGroup);
+const hallTrack = buildTrackSystem(HALL_TRACK_WAYPOINTS);
+buildTrackMeshes(hallTrack, hallTrackGroup);
+
+// The track actually driving the train right now — swapped by the "Hall"
+// button below. Train meshes themselves are plain scene children (see
+// "Train: tank engine + two coaches" below), not parented to either
+// trackGroup or hallTrackGroup, so the SAME loco/coaches can run on
+// whichever track is active without needing two sets of vehicles.
+let activeTrack = livingRoomTrack;
 
 // ---------- Train: tank engine + two coaches ----------
 // Long axis of every vehicle runs along local Z, because Object3D.lookAt()
@@ -1039,7 +1176,10 @@ function makeCoach() {
 const loco = makeLoco();
 const coach1 = makeCoach();
 const coach2 = makeCoach();
-trackGroup.add(loco, coach1, coach2);
+// Direct scene children, not parented to trackGroup — this is the SAME
+// train whether the living room's loop or the hall's oval is active (see
+// activeTrack above), so it can't live inside either room-specific group.
+scene.add(loco, coach1, coach2);
 
 // Thin coupling rods so the three vehicles read as one connected train
 // rather than three separate floating blocks.
@@ -1049,7 +1189,7 @@ function makeCoupling() {
 }
 const coupling1 = makeCoupling();
 const coupling2 = makeCoupling();
-trackGroup.add(coupling1, coupling2);
+scene.add(coupling1, coupling2);
 
 const UP = new THREE.Vector3(0, 1, 0);
 function alignCoupling(mesh, posA, posB) {
@@ -1099,8 +1239,8 @@ const LOCO_HALF_LEN = 0.03;    // half the loco's wheelbase (wheel pairs at z=+0
 const COACH_HALF_LEN = 0.045;  // half the coach's wheelbase (wheel pairs at z=+-0.045)
 
 function placeAt(obj, s, halfLen) {
-  const front = pointAndTangentAtDistance(s + halfLen).point;
-  const back = pointAndTangentAtDistance(s - halfLen).point;
+  const front = activeTrack.pointAndTangentAtDistance(s + halfLen).point;
+  const back = activeTrack.pointAndTangentAtDistance(s - halfLen).point;
   const mid = front.clone().add(back).multiplyScalar(0.5);
   mid.y += 0.025;
   obj.position.copy(mid);
@@ -1179,7 +1319,7 @@ updateTrain(0);
 // rails" is guaranteed to be open floor wherever the loop happens to
 // start.
 {
-  const { tangent } = pointAndTangentAtDistance(trainDist);
+  const { tangent } = activeTrack.pointAndTangentAtDistance(trainDist);
   const behind = loco.position.clone().addScaledVector(tangent, -0.35);
   childCamera.position.set(behind.x, 0.4, behind.z);
 }
@@ -1217,6 +1357,7 @@ btnBird.addEventListener('click', () => {
   setActiveButton(btnBird);
 });
 btnScan.addEventListener('click', () => {
+  if (hallMode) return; // living-room-only toggle; irrelevant while the hall is shown
   loadScanIfNeeded();
   const showScan = !scanRoomGroup.visible;
   scanRoomGroup.visible = showScan;
@@ -1224,6 +1365,46 @@ btnScan.addEventListener('click', () => {
   scene.background = new THREE.Color(showScan ? 0x202020 : 0xdfe6ec);
   btnScan.classList.toggle('active', showScan);
   btnScan.textContent = showScan ? 'Hand-built room' : 'Real scan view';
+});
+
+// ---------- Hall / living-room room switch ----------
+// Mutually exclusive with the living room entirely (room, scan backdrop
+// AND track all swap together) — rather than trying to let the hall's
+// scan/track coexist with the living room's, which the real flat's own
+// doorway would eventually bridge (see NOTES.md "Plan", item 4), this
+// keeps the two rooms as two clean, independently-correct scenes for now.
+let hallMode = false;
+let preHallShowScan = false; // which living-room sub-view to restore on leaving the hall
+const btnHall = document.getElementById('viewHall');
+btnHall.addEventListener('click', () => {
+  hallMode = !hallMode;
+  if (hallMode) {
+    loadHallScanIfNeeded();
+    preHallShowScan = scanRoomGroup.visible;
+    scanRoomGroup.visible = false;
+    handBuiltRoomGroup.visible = false;
+    trackGroup.visible = false;
+    scanHallGroup.visible = true;
+    hallTrackGroup.visible = true;
+    activeTrack = hallTrack;
+    currentBoundW = HALL_BOUND_W;
+    currentBoundD = HALL_BOUND_D;
+    scene.background = new THREE.Color(0x202020);
+  } else {
+    scanHallGroup.visible = false;
+    hallTrackGroup.visible = false;
+    trackGroup.visible = true;
+    scanRoomGroup.visible = preHallShowScan;
+    handBuiltRoomGroup.visible = !preHallShowScan;
+    activeTrack = livingRoomTrack;
+    currentBoundW = ROOM_BOUND_W;
+    currentBoundD = ROOM_BOUND_D;
+    scene.background = new THREE.Color(preHallShowScan ? 0x202020 : 0xdfe6ec);
+  }
+  trainDist = 0;
+  updateBirdFrustum();
+  btnHall.classList.toggle('active', hallMode);
+  btnHall.textContent = hallMode ? 'Back to living room' : 'Hall';
 });
 
 const toggleBtn = document.getElementById('toggleRun');
