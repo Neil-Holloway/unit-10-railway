@@ -1291,9 +1291,9 @@ const COACH2_GAP = 0.34; // metres, loco to coach2
 const LOCO_HALF_LEN = 0.03;    // half the loco's wheelbase (wheel pairs at z=+0.032/-0.028)
 const COACH_HALF_LEN = 0.045;  // half the coach's wheelbase (wheel pairs at z=+-0.045)
 
-function placeAt(obj, s, halfLen, track = activeTrack) {
-  const front = track.pointAndTangentAtDistance(s + halfLen).point;
-  const back = track.pointAndTangentAtDistance(s - halfLen).point;
+function placeAt(obj, s, halfLen, track = activeTrack, dir = 1) {
+  const front = track.pointAndTangentAtDistance(s + dir * halfLen).point;
+  const back = track.pointAndTangentAtDistance(s - dir * halfLen).point;
   const mid = front.clone().add(back).multiplyScalar(0.5);
   mid.y += 0.025;
   obj.position.copy(mid);
@@ -1336,9 +1336,9 @@ function updateTrain(dt) {
   // Train 2 always runs on the hall's outer oval — harmless to keep
   // updating its position even while hidden outside hall mode (cheap, and
   // avoids any pop/jump the moment the hall is re-entered).
-  placeAt(loco2, trainDist2, LOCO_HALF_LEN, hallTrack2);
-  placeAt(coach2a, trainDist2 - COACH1_GAP, COACH_HALF_LEN, hallTrack2);
-  placeAt(coach2b, trainDist2 - COACH2_GAP, COACH_HALF_LEN, hallTrack2);
+  placeAt(loco2, trainDist2, LOCO_HALF_LEN, hallTrack2, -1);
+  placeAt(coach2a, trainDist2 + COACH1_GAP, COACH_HALF_LEN, hallTrack2, -1);
+  placeAt(coach2b, trainDist2 + COACH2_GAP, COACH_HALF_LEN, hallTrack2, -1);
   alignCoupling(coupling2a, loco2.position, coach2a.position);
   alignCoupling(coupling2b, coach2a.position, coach2b.position);
 
