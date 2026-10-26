@@ -1032,41 +1032,51 @@ function buildTrackMeshes(trackSystem, group) {
 const livingRoomTrack = buildTrackSystem(TRACK_WAYPOINTS);
 buildTrackMeshes(livingRoomTrack, trackGroup);
 
-// ---------- Hall: simple single oval ----------
+// ---------- Hall: concentric double oval ----------
 // Unlike the living room's dual-lane loop (which has to weave past real
 // furniture), the hall is an open rectangular corridor once the doors are
-// closed, so a simple single-track oval fits with no obstacles to route
-// around. radius/centreline/arc-centre values below were validated by
-// sampling 301 points round this exact curve and raycasting each straight
-// down against the real hall scan mesh: 0 points came back off the real
-// floor height or missed the mesh entirely. Coordinates are in the hall's
-// own aligned (x=u long axis, z=v short axis) world frame established by
-// scanHallGroup above — real usable corridor width through the core of the
-// hall is a stable ~1.28-1.38m (narrower, erratic readings only right at
-// the two doorway-reveal ends), comfortably clearing this oval's v range
-// of roughly -0.30 to 0.40.
-const HALL_TURN_RADIUS = 0.35;
-const HALL_CENTRELINE_V = 0.05;
-const HALL_WEST_TURN_U = -1.0;
-const HALL_EAST_TURN_U = 0.6;
-const HALL_TRACK_WAYPOINTS = [
-  ...arcPoints(HALL_EAST_TURN_U, HALL_CENTRELINE_V, HALL_TURN_RADIUS, -90, 90, TURN_SEGS),
-  [-0.2, HALL_CENTRELINE_V + HALL_TURN_RADIUS], // top straight midpoint
-  ...arcPoints(HALL_WEST_TURN_U, HALL_CENTRELINE_V, HALL_TURN_RADIUS, 90, 270, TURN_SEGS),
-  [-0.2, HALL_CENTRELINE_V - HALL_TURN_RADIUS], // bottom straight midpoint
-];
+// closed, so two concentric single-track ovals fit with no obstacles to
+// route around — one for each train, running opposite ways round so they
+// pass each other like a real double-track line. Centreline/turn-centre/
+// radius values below were re-validated (2026-10-26) by raycasting dense
+// samples round BOTH ovals against the real hall scan mesh: genuine real
+// floor bump stays within roughly -0.04 to +0.02m of flat (see
+// HALL_TRACK_HEIGHT below), and a tiny real gap in the scan mesh near
+// (u=1.7-1.8, v=0.2) — almost certainly where a side door reveal lets the
+// capture see past the hall wall — shows up as a handful of stray
+// raycast misses, not a width-limiting obstruction (real floor still
+// extends either side of it). Coordinates are in the hall's own aligned
+// (x=u long axis, z=v short axis) world frame established by
+// scanHallGroup above. Full-length profiling found the real corridor
+// floor usable from roughly u=-2.05 to u=+2.05 (narrowing quickly beyond,
+// at the two doorway-reveal ends) with a stable ~1.3-1.45m width through
+// most of that — except a local pinch to ~1.2m right around u=0 (likely a
+// door reveal into a side room partway along the hall), which is what
+// caps how wide the OUTER oval can be.
+const HALL_CENTRELINE_V = 0.0;
+const HALL_WEST_TURN_U = -1.37;
+const HALL_EAST_TURN_U = 1.37;
+const HALL_TURN_RADIUS = 0.38;       // inner oval (train 1, existing direction)
+const HALL_TURN_RADIUS_2 = 0.48;     // outer oval (train 2, opposite direction)
+
+function buildHallOval(radius) {
+  return [
+    ...arcPoints(HALL_EAST_TURN_U, HALL_CENTRELINE_V, radius, -90, 90, TURN_SEGS),
+    [0, HALL_CENTRELINE_V + radius], // top straight midpoint
+    ...arcPoints(HALL_WEST_TURN_U, HALL_CENTRELINE_V, radius, 90, 270, TURN_SEGS),
+    [0, HALL_CENTRELINE_V - radius], // bottom straight midpoint
+  ];
+}
+
+const HALL_TRACK_WAYPOINTS = buildHallOval(HALL_TURN_RADIUS);
+const HALL_TRACK_WAYPOINTS_2 = buildHallOval(HALL_TURN_RADIUS_2);
 
 // Unlike the hand-built living-room floor (a perfectly flat plane at
-// y=0), the real hall scan's floor is genuinely uneven — a dense raycast
-// sweep along this exact oval found real floor height varying from
-// -0.011 to +0.015m around the single flat HALL_FLOOR_Y offset (worst
-// bump at the west/top, near u=-0.86, v=0.40). At the living-room's
-// default TRACK_HEIGHT (0.003m) the rail/sleeper meshes sat BELOW that
-// bump and were swallowed by the real floor mesh there — visible as a
-// chunk of missing track in bird's-eye view even though the train (which
-// rides its own computed position, not the rendered mesh) still ran the
-// full circuit correctly. Raised well clear of the worst real bump found.
-const HALL_TRACK_HEIGHT = 0.025;
+// y=0), the real hall scan's floor is genuinely uneven. Re-profiled
+// (2026-10-26) over this longer/wider pair of ovals: real floor bump
+// stays within about -0.04 to +0.02m of flat. Raised well clear of the
+// worst real bump found, same fix as the original single-oval version.
+const HALL_TRACK_HEIGHT = 0.03;
 
 const hallTrackGroup = new THREE.Group();
 hallTrackGroup.visible = false;
@@ -1074,11 +1084,19 @@ scene.add(hallTrackGroup);
 const hallTrack = buildTrackSystem(HALL_TRACK_WAYPOINTS, HALL_TRACK_HEIGHT);
 buildTrackMeshes(hallTrack, hallTrackGroup);
 
-// The track actually driving the train right now — swapped by the "Hall"
+const hallTrackGroup2 = new THREE.Group();
+hallTrackGroup2.visible = false;
+scene.add(hallTrackGroup2);
+const hallTrack2 = buildTrackSystem(HALL_TRACK_WAYPOINTS_2, HALL_TRACK_HEIGHT);
+buildTrackMeshes(hallTrack2, hallTrackGroup2);
+
+// The track actually driving train 1 right now — swapped by the "Hall"
 // button below. Train meshes themselves are plain scene children (see
 // "Train: tank engine + two coaches" below), not parented to either
 // trackGroup or hallTrackGroup, so the SAME loco/coaches can run on
-// whichever track is active without needing two sets of vehicles.
+// whichever track is active without needing two sets of vehicles. Train 2
+// only ever exists in the hall, so it always runs on hallTrack2 directly
+// (see "Second train" below) rather than through this swap.
 let activeTrack = livingRoomTrack;
 
 // ---------- Train: tank engine + two coaches ----------
@@ -1100,9 +1118,9 @@ function addWheelPair(g, z) {
   }
 }
 
-function makeLoco() {
+function makeLoco(bodyColor = 0x1f3b57) {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1f3b57, metalness: 0.3, roughness: 0.5 });
+  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, metalness: 0.3, roughness: 0.5 });
   const detailMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, metalness: 0.5, roughness: 0.4 });
 
   // Boiler: a horizontal cylinder, the classic tank-engine barrel shape.
@@ -1143,9 +1161,9 @@ function makeLoco() {
   return g;
 }
 
-function makeCoach() {
+function makeCoach(bodyColor = 0x7a2e2e) {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x7a2e2e, roughness: 0.6 });
+  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.6 });
   const roofMat = new THREE.MeshStandardMaterial({ color: 0x5c5c5c, roughness: 0.7 });
   const glassMat = new THREE.MeshStandardMaterial({ color: 0xbfd4de, roughness: 0.3, metalness: 0.2 });
 
@@ -1203,6 +1221,25 @@ const coupling1 = makeCoupling();
 const coupling2 = makeCoupling();
 scene.add(coupling1, coupling2);
 
+// ---------- Second train (hall only, opposite direction) ----------
+// Runs on hallTrack2 (the outer oval) at all times — unlike the first
+// train, it never switches to the living room's loop, so it doesn't need
+// an "activeTrack"-style indirection. A different body colour (green vs
+// the first train's blue/maroon) makes the two trains easy to tell apart
+// at a glance. Grouped so visibility can be toggled with one flag when
+// entering/leaving the hall (see the "Hall / living-room room switch" UI
+// handler below).
+const train2Group = new THREE.Group();
+train2Group.visible = false;
+scene.add(train2Group);
+
+const loco2 = makeLoco(0x2f6b3a);
+const coach2a = makeCoach(0x3a7a4a);
+const coach2b = makeCoach(0x3a7a4a);
+const coupling2a = makeCoupling();
+const coupling2b = makeCoupling();
+train2Group.add(loco2, coach2a, coach2b, coupling2a, coupling2b);
+
 const UP = new THREE.Vector3(0, 1, 0);
 function alignCoupling(mesh, posA, posB) {
   const dir = new THREE.Vector3().subVectors(posB, posA);
@@ -1216,6 +1253,10 @@ function alignCoupling(mesh, posA, posB) {
 let scaleMph = 25;
 let running = true;
 let trainDist = 0; // metres travelled along the track (wraps at trackLength)
+// Train 2 (hall only) decrements instead of incrementing — same speed
+// control, opposite direction round its own concentric oval, so the two
+// trains visibly pass each other going opposite ways.
+let trainDist2 = 0;
 
 function metresPerSecondFromScaleMph(mph) {
   const realMps = mph * 0.44704; // mph -> m/s at full size
@@ -1250,9 +1291,9 @@ const COACH2_GAP = 0.34; // metres, loco to coach2
 const LOCO_HALF_LEN = 0.03;    // half the loco's wheelbase (wheel pairs at z=+0.032/-0.028)
 const COACH_HALF_LEN = 0.045;  // half the coach's wheelbase (wheel pairs at z=+-0.045)
 
-function placeAt(obj, s, halfLen) {
-  const front = activeTrack.pointAndTangentAtDistance(s + halfLen).point;
-  const back = activeTrack.pointAndTangentAtDistance(s - halfLen).point;
+function placeAt(obj, s, halfLen, track = activeTrack) {
+  const front = track.pointAndTangentAtDistance(s + halfLen).point;
+  const back = track.pointAndTangentAtDistance(s - halfLen).point;
   const mid = front.clone().add(back).multiplyScalar(0.5);
   mid.y += 0.025;
   obj.position.copy(mid);
@@ -1284,12 +1325,22 @@ function updateTrain(dt) {
   if (running) {
     const modelMps = metresPerSecondFromScaleMph(scaleMph);
     trainDist += modelMps * dt;
+    trainDist2 -= modelMps * dt;
   }
   placeAt(loco, trainDist, LOCO_HALF_LEN);
   placeAt(coach1, trainDist - COACH1_GAP, COACH_HALF_LEN);
   placeAt(coach2, trainDist - COACH2_GAP, COACH_HALF_LEN);
   alignCoupling(coupling1, loco.position, coach1.position);
   alignCoupling(coupling2, coach1.position, coach2.position);
+
+  // Train 2 always runs on the hall's outer oval — harmless to keep
+  // updating its position even while hidden outside hall mode (cheap, and
+  // avoids any pop/jump the moment the hall is re-entered).
+  placeAt(loco2, trainDist2, LOCO_HALF_LEN, hallTrack2);
+  placeAt(coach2a, trainDist2 - COACH1_GAP, COACH_HALF_LEN, hallTrack2);
+  placeAt(coach2b, trainDist2 - COACH2_GAP, COACH_HALF_LEN, hallTrack2);
+  alignCoupling(coupling2a, loco2.position, coach2a.position);
+  alignCoupling(coupling2b, coach2a.position, coach2b.position);
 
   childCamera.position.copy(loco.position).add(camLocalOffset.applyQuaternion(loco.quaternion));
 
@@ -1398,6 +1449,8 @@ btnHall.addEventListener('click', () => {
     trackGroup.visible = false;
     scanHallGroup.visible = true;
     hallTrackGroup.visible = true;
+    hallTrackGroup2.visible = true;
+    train2Group.visible = true;
     activeTrack = hallTrack;
     currentBoundW = HALL_BOUND_W;
     currentBoundD = HALL_BOUND_D;
@@ -1405,6 +1458,8 @@ btnHall.addEventListener('click', () => {
   } else {
     scanHallGroup.visible = false;
     hallTrackGroup.visible = false;
+    hallTrackGroup2.visible = false;
+    train2Group.visible = false;
     trackGroup.visible = true;
     scanRoomGroup.visible = preHallShowScan;
     handBuiltRoomGroup.visible = !preHallShowScan;
@@ -1414,6 +1469,7 @@ btnHall.addEventListener('click', () => {
     scene.background = new THREE.Color(preHallShowScan ? 0x202020 : 0xdfe6ec);
   }
   trainDist = 0;
+  trainDist2 = 0;
   updateBirdFrustum();
   btnHall.classList.toggle('active', hallMode);
   btnHall.textContent = hallMode ? 'Back to living room' : 'Hall';
