@@ -47,8 +47,12 @@
   <div id="scanStatus" style="margin-top: 6px; font-size: 12px; opacity: 0.8;"></div>
   <div style="margin-top: 8px;">
     <button id="toggleRun">Pause</button>
-    Speed: <span id="speedLabel">25</span> scale mph
+    Speed (train 1): <span id="speedLabel">25</span> scale mph
     <input id="speedSlider" type="range" min="0" max="60" value="25" />
+  </div>
+  <div style="margin-top: 4px;">
+    Speed (train 2): <span id="speedLabel2">25</span> scale mph
+    <input id="speedSlider2" type="range" min="0" max="60" value="25" />
   </div>
 </div>
 
@@ -1251,11 +1255,13 @@ function alignCoupling(mesh, posA, posB) {
 
 // ---------- Train motion ----------
 let scaleMph = 25;
+let scaleMph2 = 25; // train 2 has its own independent speed control
 let running = true;
 let trainDist = 0; // metres travelled along the track (wraps at trackLength)
-// Train 2 (hall only) decrements instead of incrementing — same speed
-// control, opposite direction round its own concentric oval, so the two
-// trains visibly pass each other going opposite ways.
+// Train 2 (hall only) decrements instead of incrementing — opposite
+// direction round its own concentric oval, so the two trains visibly pass
+// each other going opposite ways. Speed is independent (scaleMph2) rather
+// than shared, so each train can be run at its own pace.
 let trainDist2 = 0;
 
 function metresPerSecondFromScaleMph(mph) {
@@ -1329,9 +1335,8 @@ function updateTrain(dt) {
   const camLocalOffset = childCamera.position.clone().sub(loco.position).applyQuaternion(loco.quaternion.clone().invert());
 
   if (running) {
-    const modelMps = metresPerSecondFromScaleMph(scaleMph);
-    trainDist += modelMps * dt;
-    trainDist2 -= modelMps * dt;
+    trainDist += metresPerSecondFromScaleMph(scaleMph) * dt;
+    trainDist2 -= metresPerSecondFromScaleMph(scaleMph2) * dt;
   }
   placeAt(loco, trainDist, LOCO_HALF_LEN);
   placeAt(coach1, trainDist - COACH1_GAP, COACH_HALF_LEN);
@@ -1492,6 +1497,13 @@ const speedLabel = document.getElementById('speedLabel');
 speedSlider.addEventListener('input', () => {
   scaleMph = Number(speedSlider.value);
   speedLabel.textContent = scaleMph;
+});
+
+const speedSlider2 = document.getElementById('speedSlider2');
+const speedLabel2 = document.getElementById('speedLabel2');
+speedSlider2.addEventListener('input', () => {
+  scaleMph2 = Number(speedSlider2.value);
+  speedLabel2.textContent = scaleMph2;
 });
 
 // ---------- Resize ----------
