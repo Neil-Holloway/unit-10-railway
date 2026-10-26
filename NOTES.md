@@ -122,6 +122,11 @@ No photo shows the worktop or these four appliances specifically (only the fridg
 - **Microwave**: a white-gloss countertop microwave (`makeMicrowave()`, matches `unitMat`), placed on the front-wall-run worktop near the open end of the U.
 - New shared materials: `worktopMat` (worktop cap), `hobMat` (hob glass / oven window / microwave door), `chromeMat` (tap, hob rings, handles).
 
+**Corrections, same day, second pass** — George flagged the first version as not reading as his actual kitchen at all: no cupboard doors visible under the worktops, the oven on the wrong leg, and the sink effectively invisible against the worktop.
+- **Cabinet doors added** (`addCabinetDetail()`): every worktop-height cabinet run now gets a dark recessed kickboard along the floor, vertical door-seam grooves spaced ~45cm apart, and a chrome handle per door — so the units read as a run of individual cabinet doors, not a plain slab. Applied to all worktop-height runs except the hob/oven leg (its front face is mostly taken up by the hob/oven themselves, so cabinet-door detail there would visually collide with them).
+- **Hob/oven moved**: previously both were on leg1 (the sink's own leg) — a bad floor plan (sink and hob crowded onto the same run) and the oven only had ~8cm of worktop left before the wall corner. Moved to the other leg (the E-F front-wall run), oven door facing into the walkway as before. Re-verified via screenshots that the oven door/window/handle and the hob rings render on the correct (room-facing) face, not the wall-backed one.
+- **Sink made visible**: added a raised chrome rim around the basin, and gave the basin interior its own much-darker material (`sinkBasinMat`, near-black) instead of reusing the mid-grey `applianceMat` — the basin was barely distinguishable from the worktop/fridge colour before. Confirmed via a top-down screenshot that the basin now reads clearly as a sink void, not a shadow.
+
 ## Plan
 1. Living room in full detail: furniture and finishes, first loop routed clear of furniture, both views.
 2. Room builder and track builder (OO-gauge pieces, points, gradients, tunnels through walls).
@@ -154,3 +159,15 @@ Ten further ideas were discussed and assessed for feasibility. The core architec
 
 **Phase E — flat expansion:**
 - Extend track into the hall and both bedrooms. Partly blocked: bedroom sizes aren't measured yet (hall width 1.4m and ceiling height 2.28m are already in NOTES.md, bedroom dimensions still needed). Can be done as a simple loop extension (no graph required) if it stays one line, or combined with Phase C if a junction is wanted where the hall meets the living room.
+
+## Real scan view (2026-10-26)
+
+George felt the hand-built room/furniture still didn't read as recognisably "his flat" to a child, even after the kitchen detailing pass. Rather than chase photo-textured boxes further, tested true photoreal capture: George scanned the whole flat with Polycam ("3D Space" mode) and exported GLTF/GLB (`lounge-scan.glb`, ~24MB, captures the whole flat not just the lounge).
+
+- Added a third **"Real scan view"** button/camera mode in `index.html`, alongside Child's-eye and Bird's-eye.
+- The scan is rendered in its **own `THREE.Scene`** (`scanScene`), not merged into the hand-built room — the scan's own geometry already contains a full room/furniture at a scale and origin with no known relationship to the hand-built coordinate system, so overlaying both would just produce two conflicting, misaligned rooms. `animate()` picks which scene to render based on which camera is active.
+- Scan is **lazy-loaded** on first click of the button (24MB — no reason to pay that cost on every page load), with a status line (`#scanStatus`) showing load progress.
+- Scan materials are swapped to unlit `MeshBasicMaterial` (texture map only, no relighting) — the captured textures are already baked/lit from the scan itself, and rendering them through normal `MeshStandardMaterial` + scene lights came out almost black. This was proven out first in a standalone diagnostic viewer (`scans/test.html`, loads `../lounge-scan.glb`) before being carried into the real app.
+- Camera auto-frames from the loaded model's bounding box (center + max dimension), since the scan's real-world framing isn't known in advance.
+- Verified: switching to Real scan view shows a genuinely recognisable scan of the flat (sofa, bookcase, fireplace, kitchen units, wall art); switching back to Child's-eye/Bird's-eye renders the hand-built scene cleanly with no leftover state.
+- Not yet done: aligning/trimming the scan to just the lounge, or using it for anything beyond a standalone "real photo" view (e.g. no plan to merge it with the train track).

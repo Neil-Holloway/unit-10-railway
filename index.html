@@ -41,7 +41,9 @@
   <div>
     <button id="viewChild" class="active">Child's-eye view</button>
     <button id="viewBird">Bird's-eye view</button>
+    <button id="viewScan">Real scan view</button>
   </div>
+  <div id="scanStatus" style="margin-top: 6px; font-size: 12px; opacity: 0.8;"></div>
   <div style="margin-top: 8px;">
     <button id="toggleRun">Pause</button>
     Speed: <span id="speedLabel">25</span> scale mph
@@ -61,6 +63,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /* ----------------------------------------------------------------------
    Unit 10 Railway — scaffold
@@ -140,6 +143,85 @@ function updateBirdFrustum() {
 updateBirdFrustum();
 
 let activeCamera = childCamera;
+
+// ---------- Real scan view ----------
+// A genuine Polycam room-scan (GLTF export of the whole flat), shown in its
+// own Scene rather than merged into the hand-built room — the scan's own
+// geometry already IS the room/furniture, at a scale/origin that has no
+// known relationship to the hand-built coordinate system, so overlaying
+// both would just produce two conflicting, misaligned rooms. Switching to
+// this view renders scanScene instead of scene; switching away renders the
+// hand-built scene as before.
+const scanScene = new THREE.Scene();
+scanScene.background = new THREE.Color(0x202020);
+scanScene.add(new THREE.AmbientLight(0xffffff, 1.6));
+const scanDir1 = new THREE.DirectionalLight(0xffffff, 1.4);
+scanDir1.position.set(5, 10, 5);
+scanScene.add(scanDir1);
+const scanDir2 = new THREE.DirectionalLight(0xffffff, 1.0);
+scanDir2.position.set(-5, 8, -5);
+scanScene.add(scanDir2);
+
+const scanCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 100);
+const scanControls = new OrbitControls(scanCamera, renderer.domElement);
+
+let scanLoaded = false;
+let scanLoading = false;
+const scanStatusEl = document.getElementById('scanStatus');
+
+function loadScanIfNeeded() {
+  if (scanLoaded || scanLoading) return;
+  scanLoading = true;
+  scanStatusEl.textContent = 'Loading real scan…';
+  const loader = new GLTFLoader();
+  loader.load(
+    'lounge-scan.glb',
+    (gltf) => {
+      const model = gltf.scene;
+      scanScene.add(model);
+
+      // The scan's textures are already baked/lit from capture — render
+      // them unlit so they show their true captured colour rather than
+      // being (incorrectly) re-lit and washed out by scanScene's lights.
+      model.traverse((o) => {
+        if (o.isMesh && o.material) {
+          const old = o.material;
+          o.material = new THREE.MeshBasicMaterial({
+            map: old.map || null,
+            vertexColors: old.vertexColors || false,
+            color: old.map ? 0xffffff : (old.color || 0xffffff),
+          });
+        }
+      });
+
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+
+      scanControls.target.copy(center);
+      scanCamera.position.set(center.x + maxDim * 0.4, center.y + maxDim * 0.25, center.z + maxDim * 0.4);
+      scanCamera.near = maxDim / 1000;
+      scanCamera.far = maxDim * 10;
+      scanCamera.updateProjectionMatrix();
+      scanControls.update();
+
+      scanLoaded = true;
+      scanLoading = false;
+      scanStatusEl.textContent = 'Real scan loaded — drag to look around.';
+    },
+    (xhr) => {
+      if (xhr.total) {
+        scanStatusEl.textContent = `Loading real scan… ${(xhr.loaded / xhr.total * 100).toFixed(0)}%`;
+      }
+    },
+    (err) => {
+      scanLoading = false;
+      scanStatusEl.textContent = 'Failed to load real scan.';
+      console.error(err);
+    }
+  );
+}
 
 // ---------- Lighting ----------
 scene.add(new THREE.HemisphereLight(0xffffff, 0x55606a, 1.1));
@@ -283,6 +365,7 @@ const furnitureLegMat = new THREE.MeshStandardMaterial({ color: 0x33281f, roughn
 const worktopMat = new THREE.MeshStandardMaterial({ color: 0xdedad2, roughness: 0.25, metalness: 0.05 }); // worktop cap
 const hobMat = new THREE.MeshStandardMaterial({ color: 0x15151a, roughness: 0.15, metalness: 0.2 }); // hob glass / oven window / microwave door
 const chromeMat = new THREE.MeshStandardMaterial({ color: 0xc9cdd0, roughness: 0.15, metalness: 0.9 }); // tap, rings, handles
+const sinkBasinMat = new THREE.MeshStandardMaterial({ color: 0x3a3d40, roughness: 0.4, metalness: 0.6 }); // dark basin interior, deliberately darker than applianceMat for visibility
 
 function addBlock(parent, mat, w, h, d, cx, cy, cz) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -301,6 +384,59 @@ function addWorktopCap(parent, w, d, cx, cz) {
   addBlock(parent, worktopMat, w + 0.04, CAP_T, d + 0.04, cx, WORKTOP_H + CAP_T / 2, cz);
 }
 
+// Cabinet-door detailing for a worktop-height cabinet box, so it reads as
+// a run of kitchen units rather than a plain slab, regardless of which
+// pair of faces ends up facing the camera: a dark recessed kickboard
+// along the floor, vertical door-seam grooves spaced along the run, and a
+// handle on each door panel — applied to BOTH long faces (we don't track
+// true wall-facing orientation per call site, so decorating both is the
+// simple, robust option; the back face is against a wall in reality and
+// is never seen anyway).
+const kickboardMat = new THREE.MeshStandardMaterial({ color: 0x1c1a17, roughness: 0.7 });
+const seamMat = new THREE.MeshStandardMaterial({ color: 0xcfc9bd, roughness: 0.3 });
+function addCabinetDetail(parent, w, d, cx, cz) {
+  const KICK_H = 0.10;
+  const KICK_INSET = 0.04;
+  const kickboard = new THREE.Mesh(
+    new THREE.BoxGeometry(w - KICK_INSET, KICK_H, d - KICK_INSET),
+    kickboardMat
+  );
+  kickboard.position.set(cx, KICK_H / 2, cz);
+  kickboard.castShadow = true;
+  kickboard.receiveShadow = true;
+  parent.add(kickboard);
+
+  const doorTop = WORKTOP_H - 0.02;
+  const doorBottom = KICK_H + 0.02;
+  const doorH = doorTop - doorBottom;
+  const doorY = (doorTop + doorBottom) / 2;
+  const runLong = Math.max(w, d);
+  const runShort = Math.min(w, d);
+  const DOOR_W = 0.45;
+  const doorCount = Math.max(1, Math.round(runLong / DOOR_W));
+  const step = runLong / doorCount;
+
+  for (let i = 1; i < doorCount; i++) {
+    const offset = -runLong / 2 + i * step;
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(0.012, doorH, 0.012), seamMat);
+    if (w >= d) seam.position.set(cx + offset, doorY, cz);
+    else seam.position.set(cx, doorY, cz + offset);
+    parent.add(seam);
+  }
+
+  const handleGeo = new THREE.BoxGeometry(0.02, 0.16, 0.02);
+  for (let i = 0; i < doorCount; i++) {
+    const offset = -runLong / 2 + (i + 0.5) * step + (i % 2 === 0 ? DOOR_W * 0.25 : -DOOR_W * 0.25);
+    for (const side of [-1, 1]) {
+      const handle = new THREE.Mesh(handleGeo, chromeMat);
+      const faceOffset = (w >= d ? d : w) / 2 + 0.012;
+      if (w >= d) handle.position.set(cx + offset, doorTop - 0.14, cz + side * faceOffset);
+      else handle.position.set(cx + side * faceOffset, doorTop - 0.14, cz + offset);
+      parent.add(handle);
+    }
+  }
+}
+
 // A stainless sink basin recessed into a worktop cap, plus a chrome mixer
 // tap at the back (wall side). Local origin sits ON the worktop surface,
 // centred on the counter footprint; local x runs wall side (-x) to open
@@ -311,7 +447,17 @@ function makeSink(width, depth) {
   const BASIN_W = width * 0.85;
   const BASIN_D = depth * 0.65;
   const BASIN_DEEP = 0.16;
-  const basin = new THREE.Mesh(new THREE.BoxGeometry(BASIN_D, BASIN_DEEP, BASIN_W), applianceMat);
+
+  // Raised chrome rim (sits proud of the worktop) so the sink reads
+  // clearly from above even before the dark basin void is visible.
+  const rim = new THREE.Mesh(new THREE.BoxGeometry(BASIN_D + 0.05, 0.015, BASIN_W + 0.05), chromeMat);
+  rim.position.set(0.03, 0.0075, 0);
+  g.add(rim);
+
+  // Dark basin interior — intentionally much darker than the stainless
+  // fridge/appliance colour for strong contrast against the light
+  // worktop, so the sink reads at a glance rather than blending in.
+  const basin = new THREE.Mesh(new THREE.BoxGeometry(BASIN_D, BASIN_DEEP, BASIN_W), sinkBasinMat);
   basin.position.set(0.03, -BASIN_DEEP / 2, 0);
   g.add(basin);
 
@@ -483,6 +629,7 @@ addBlock(
   A.x + UNIT_DEPTH / 2, WORKTOP_H / 2, (cupboardStartZ + cupboardEndZ) / 2
 );
 addWorktopCap(kitchenGroup, UNIT_DEPTH, 3.60, A.x + UNIT_DEPTH / 2, (cupboardStartZ + cupboardEndZ) / 2);
+addCabinetDetail(kitchenGroup, UNIT_DEPTH, 3.60, A.x + UNIT_DEPTH / 2, (cupboardStartZ + cupboardEndZ) / 2);
 
 // --- Kitchen U: base (130cm, containing the sink) flush against the left
 // wall, with two 260cm legs projecting into the room (+X) from each end,
@@ -498,19 +645,14 @@ addBlock(
   (F.x + legReachX) / 2, WORKTOP_H / 2, (leg1StartZ + leg1EndZ) / 2
 );
 addWorktopCap(kitchenGroup, legReachX - F.x, UNIT_DEPTH, (F.x + legReachX) / 2, (leg1StartZ + leg1EndZ) / 2);
+addCabinetDetail(kitchenGroup, legReachX - F.x, UNIT_DEPTH, (F.x + legReachX) / 2, (leg1StartZ + leg1EndZ) / 2);
 
-// Hob + built-under oven, set into leg1 (its front face is +z, facing the
-// walkway inside the U). ASSUMPTION (no photo reference): centred along
-// leg1's run, roughly a third of the way from the open end — a believable
-// hob-over-oven "range" position, not a measured one. See NOTES.md.
-const hobCenterX = legReachX - 0.9;
-const hobCenterZ = (leg1StartZ + leg1EndZ) / 2;
-const hob = makeHob();
-hob.position.set(hobCenterX, WORKTOP_H + CAP_T, hobCenterZ);
-kitchenGroup.add(hob);
-const oven = makeOven();
-oven.position.set(hobCenterX, 0.1 + 0.29, leg1EndZ);
-kitchenGroup.add(oven);
+// Countertop microwave on leg1, away from the sink and from the hob/oven
+// (now on the other leg below). ASSUMPTION (no photo reference): placement
+// only, not measured.
+const microwave = makeMicrowave();
+microwave.position.set(legReachX - 0.45, WORKTOP_H + CAP_T, (leg1StartZ + leg1EndZ) / 2);
+kitchenGroup.add(microwave);
 
 const baseStartZ = leg1EndZ;
 const baseEndZ = baseStartZ + 1.30;          // base is 130cm long; ends exactly at F
@@ -520,6 +662,7 @@ addBlock(
   F.x + UNIT_DEPTH / 2, WORKTOP_H / 2, (baseStartZ + baseEndZ) / 2
 );
 addWorktopCap(kitchenGroup, UNIT_DEPTH, 1.30, F.x + UNIT_DEPTH / 2, (baseStartZ + baseEndZ) / 2);
+addCabinetDetail(kitchenGroup, UNIT_DEPTH, 1.30, F.x + UNIT_DEPTH / 2, (baseStartZ + baseEndZ) / 2);
 
 // Sink, inset into the base unit's worktop cap (the unit this run has
 // always been annotated as containing).
@@ -534,12 +677,27 @@ addBlock(
   (E.x + F.x) / 2, WORKTOP_H / 2, F.z - UNIT_DEPTH / 2
 );
 addWorktopCap(kitchenGroup, Math.abs(E.x - F.x), UNIT_DEPTH, (E.x + F.x) / 2, F.z - UNIT_DEPTH / 2);
+// No addCabinetDetail call here — this run's cupboard-door seams/handles
+// would otherwise collide visually with the hob/oven below, which occupy
+// most of its front face.
 
-// Countertop microwave, on the front-wall-run worktop near the open end
-// of the U. ASSUMPTION (no photo reference): placement only, not measured.
-const microwave = makeMicrowave();
-microwave.position.set(E.x - 0.45, WORKTOP_H + CAP_T, F.z - UNIT_DEPTH / 2);
-kitchenGroup.add(microwave);
+// Hob + built-under oven, set into this leg (the U's second leg, away
+// from the sink's leg — a more plausible real-kitchen layout than the
+// previous placement on the sink's own leg). This run's length is along
+// x (E-F), depth along z, hugging the wall at z=F.z with its open/room
+// -facing edge at z=F.z-UNIT_DEPTH — so the oven door (local +z by
+// default) needs a 180° turn to face that open edge. ASSUMPTION (no
+// photo reference, NOTES.md records the hob position as never
+// confirmed): centred along this run. See NOTES.md.
+const hobCenterZ = F.z - UNIT_DEPTH / 2;
+const hobCenterX = (E.x + F.x) / 2;
+const hob = makeHob();
+hob.position.set(hobCenterX, WORKTOP_H + CAP_T, hobCenterZ);
+kitchenGroup.add(hob);
+const oven = makeOven();
+oven.rotation.y = Math.PI;
+oven.position.set(hobCenterX, 0.1 + 0.29, F.z - UNIT_DEPTH);
+kitchenGroup.add(oven);
 
 // --- Doorway-side cupboard/freezer/cupboard run, against the B-C wall ---
 // (the 891cm doorway->sofa wall). Sequence confirmed by direct sum in
@@ -556,7 +714,10 @@ function addWallUnit(parent, mat, lengthAlongWall, depth, height, cap) {
     depth, height, lengthAlongWall,
     B.x /* C.x === B.x */ - depth / 2, height / 2, centerZ
   );
-  if (cap) addWorktopCap(parent, depth, lengthAlongWall, B.x - depth / 2, centerZ);
+  if (cap) {
+    addWorktopCap(parent, depth, lengthAlongWall, B.x - depth / 2, centerZ);
+    addCabinetDetail(parent, depth, lengthAlongWall, B.x - depth / 2, centerZ);
+  }
 }
 addWallUnit(kitchenGroup, unitMat, 0.84, UNIT_DEPTH, WORKTOP_H, true);  // cupboard
 addWallUnit(kitchenGroup, applianceMat, 1.03, UNIT_DEPTH, WORKTOP_H);   // fridge/freezer — taller standalone appliance, no worktop cap
@@ -1026,15 +1187,22 @@ birdControls.update();
 // ---------- UI ----------
 const btnChild = document.getElementById('viewChild');
 const btnBird = document.getElementById('viewBird');
+const btnScan = document.getElementById('viewScan');
+function setActiveButton(btn) {
+  [btnChild, btnBird, btnScan].forEach((b) => b.classList.toggle('active', b === btn));
+}
 btnChild.addEventListener('click', () => {
   activeCamera = childCamera;
-  btnChild.classList.add('active');
-  btnBird.classList.remove('active');
+  setActiveButton(btnChild);
 });
 btnBird.addEventListener('click', () => {
   activeCamera = birdCamera;
-  btnBird.classList.add('active');
-  btnChild.classList.remove('active');
+  setActiveButton(btnBird);
+});
+btnScan.addEventListener('click', () => {
+  activeCamera = scanCamera;
+  setActiveButton(btnScan);
+  loadScanIfNeeded();
 });
 
 const toggleBtn = document.getElementById('toggleRun');
@@ -1055,6 +1223,8 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   childCamera.aspect = window.innerWidth / window.innerHeight;
   childCamera.updateProjectionMatrix();
+  scanCamera.aspect = window.innerWidth / window.innerHeight;
+  scanCamera.updateProjectionMatrix();
   updateBirdFrustum();
 });
 
@@ -1079,7 +1249,8 @@ function animate() {
   updateTrain(dt);
   if (activeCamera === childCamera) childControls.update();
   if (activeCamera === birdCamera) birdControls.update();
-  renderer.render(scene, activeCamera);
+  if (activeCamera === scanCamera) scanControls.update();
+  renderer.render(activeCamera === scanCamera ? scanScene : scene, activeCamera);
 }
 animate();
 </script>
