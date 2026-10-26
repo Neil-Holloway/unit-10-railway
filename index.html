@@ -144,26 +144,28 @@ updateBirdFrustum();
 
 let activeCamera = childCamera;
 
-// ---------- Real scan view ----------
-// A genuine Polycam room-scan (GLTF export of the whole flat), shown in its
-// own Scene rather than merged into the hand-built room — the scan's own
-// geometry already IS the room/furniture, at a scale/origin that has no
-// known relationship to the hand-built coordinate system, so overlaying
-// both would just produce two conflicting, misaligned rooms. Switching to
-// this view renders scanScene instead of scene; switching away renders the
-// hand-built scene as before.
-const scanScene = new THREE.Scene();
-scanScene.background = new THREE.Color(0x202020);
-scanScene.add(new THREE.AmbientLight(0xffffff, 1.6));
-const scanDir1 = new THREE.DirectionalLight(0xffffff, 1.4);
-scanDir1.position.set(5, 10, 5);
-scanScene.add(scanDir1);
-const scanDir2 = new THREE.DirectionalLight(0xffffff, 1.0);
-scanDir2.position.set(-5, 8, -5);
-scanScene.add(scanDir2);
+// ---------- Real scan backdrop ----------
+// A genuine Polycam room-scan (GLTF export of the whole flat), aligned into
+// the SAME coordinate space as the hand-built room/track/train so the train
+// can be seen running through the real scanned geometry. The scan's local
+// axes have no inherent relationship to ROOM_POLY's — the alignment below
+// (a mirror on X + translation, not a plain rotation) was derived by
+// raycasting known landmarks in the scan (the long kitchen wall, the
+// room's floor extent along Z) and cross-checking against ROOM_POLY's
+// known wall lengths until a ROOM_POLY wireframe overlay, drawn directly
+// into the scan and screenshotted from a top-down view, visually traced
+// the real walls. See NOTES.md, "Real scan alignment", for the fit method.
+//
+// scan-local -> world:  worldX = -scanX + SCAN_TX,  worldZ = scanZ + SCAN_TZ_INV
+// i.e. scanRoomGroup.scale.x = -1, position = (SCAN_TX, 0, -SCAN_TZ)
+const SCAN_TX = 0.79;
+const SCAN_TZ = 4.83;
 
-const scanCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 100);
-const scanControls = new OrbitControls(scanCamera, renderer.domElement);
+const scanRoomGroup = new THREE.Group();
+scanRoomGroup.scale.set(-1, 1, 1);
+scanRoomGroup.position.set(SCAN_TX, 0, -SCAN_TZ);
+scanRoomGroup.visible = false;
+scene.add(scanRoomGroup);
 
 let scanLoaded = false;
 let scanLoading = false;
@@ -178,11 +180,11 @@ function loadScanIfNeeded() {
     'lounge-scan.glb',
     (gltf) => {
       const model = gltf.scene;
-      scanScene.add(model);
+      scanRoomGroup.add(model);
 
       // The scan's textures are already baked/lit from capture — render
       // them unlit so they show their true captured colour rather than
-      // being (incorrectly) re-lit and washed out by scanScene's lights.
+      // being (incorrectly) re-lit by the main scene's lights.
       model.traverse((o) => {
         if (o.isMesh && o.material) {
           const old = o.material;
@@ -194,21 +196,9 @@ function loadScanIfNeeded() {
         }
       });
 
-      const box = new THREE.Box3().setFromObject(model);
-      const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-
-      scanControls.target.copy(center);
-      scanCamera.position.set(center.x + maxDim * 0.4, center.y + maxDim * 0.25, center.z + maxDim * 0.4);
-      scanCamera.near = maxDim / 1000;
-      scanCamera.far = maxDim * 10;
-      scanCamera.updateProjectionMatrix();
-      scanControls.update();
-
       scanLoaded = true;
       scanLoading = false;
-      scanStatusEl.textContent = 'Real scan loaded — drag to look around.';
+      scanStatusEl.textContent = 'Real scan loaded.';
     },
     (xhr) => {
       if (xhr.total) {
@@ -301,13 +291,19 @@ function makeFloorTexture() {
   return texture;
 }
 
+// The hand-built room shell + furniture all live in one group so it can be
+// hidden as a unit when the real scan backdrop (below) is shown instead —
+// see "Real scan backdrop" section.
+const handBuiltRoomGroup = new THREE.Group();
+scene.add(handBuiltRoomGroup);
+
 const floor = new THREE.Mesh(
   new THREE.ShapeGeometry(floorShape),
   new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 0.85, side: THREE.DoubleSide })
 );
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
-scene.add(floor);
+handBuiltRoomGroup.add(floor);
 
 // Wall colour: light warm greige, matched from the wall close-up photo.
 const wallMat = new THREE.MeshStandardMaterial({ color: 0xd8d3c9, roughness: 0.95, side: THREE.DoubleSide });
@@ -318,7 +314,7 @@ function addWall(p1, p2) {
   wall.position.set((p1[0] + p2[0]) / 2, CEILING_H / 2, (p1[1] + p2[1]) / 2);
   wall.rotation.y = vertical ? Math.PI / 2 : 0;
   wall.receiveShadow = true;
-  scene.add(wall);
+  handBuiltRoomGroup.add(wall);
   return wall;
 }
 for (let i = 0; i < ROOM_POLY.length; i++) {
@@ -334,7 +330,7 @@ for (let i = 0; i < ROOM_POLY.length; i++) {
 // photos before treating as exact.
 const kitchenGroup = new THREE.Group();
 const furnitureGroup = new THREE.Group();
-scene.add(kitchenGroup, furnitureGroup);
+handBuiltRoomGroup.add(kitchenGroup, furnitureGroup);
 
 const UNIT_DEPTH = 0.6;      // standard worktop depth
 const WORKTOP_H = 0.9;       // standard worktop height
@@ -1200,9 +1196,13 @@ btnBird.addEventListener('click', () => {
   setActiveButton(btnBird);
 });
 btnScan.addEventListener('click', () => {
-  activeCamera = scanCamera;
-  setActiveButton(btnScan);
   loadScanIfNeeded();
+  const showScan = !scanRoomGroup.visible;
+  scanRoomGroup.visible = showScan;
+  handBuiltRoomGroup.visible = !showScan;
+  scene.background = new THREE.Color(showScan ? 0x202020 : 0xdfe6ec);
+  btnScan.classList.toggle('active', showScan);
+  btnScan.textContent = showScan ? 'Hand-built room' : 'Real scan view';
 });
 
 const toggleBtn = document.getElementById('toggleRun');
@@ -1223,8 +1223,6 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   childCamera.aspect = window.innerWidth / window.innerHeight;
   childCamera.updateProjectionMatrix();
-  scanCamera.aspect = window.innerWidth / window.innerHeight;
-  scanCamera.updateProjectionMatrix();
   updateBirdFrustum();
 });
 
@@ -1249,8 +1247,7 @@ function animate() {
   updateTrain(dt);
   if (activeCamera === childCamera) childControls.update();
   if (activeCamera === birdCamera) birdControls.update();
-  if (activeCamera === scanCamera) scanControls.update();
-  renderer.render(activeCamera === scanCamera ? scanScene : scene, activeCamera);
+  renderer.render(scene, activeCamera);
 }
 animate();
 </script>
