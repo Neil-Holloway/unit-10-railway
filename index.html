@@ -149,21 +149,42 @@ let activeCamera = childCamera;
 // the SAME coordinate space as the hand-built room/track/train so the train
 // can be seen running through the real scanned geometry. The scan's local
 // axes have no inherent relationship to ROOM_POLY's — the alignment below
-// (a mirror on X + translation, not a plain rotation) was derived by
-// raycasting known landmarks in the scan (the long kitchen wall, the
-// room's floor extent along Z) and cross-checking against ROOM_POLY's
-// known wall lengths until a ROOM_POLY wireframe overlay, drawn directly
-// into the scan and screenshotted from a top-down view, visually traced
-// the real walls. See NOTES.md, "Real scan alignment", for the fit method.
+// is a 180° rotation about Y (both X and Z negated) plus translation,
+// derived by raycasting known landmarks in the scan (the long kitchen
+// wall, the room's floor extent along Z) and cross-checking against
+// ROOM_POLY's known wall lengths until a ROOM_POLY wireframe overlay,
+// drawn directly into the scan and screenshotted from a top-down view,
+// visually traced the real walls. See NOTES.md, "Real scan alignment",
+// for the fit method.
 //
-// scan-local -> world:  worldX = -scanX + SCAN_TX,  worldZ = scanZ + SCAN_TZ_INV
-// i.e. scanRoomGroup.scale.x = -1, position = (SCAN_TX, 0, -SCAN_TZ)
+// IMPORTANT: this must be a rotation (determinant +1), never a single-axis
+// mirror (determinant -1). An earlier version used scale.x=-1 alone, which
+// fit the wall footprint just as well (wall-length/extent matching can't
+// tell a mirror from a rotation) but was wrong: it mirrored every real,
+// recognisable texture in the scan (so the room looked backwards — the
+// sofa appeared to be on the wrong wall) and it also fit the wrong real
+// floor points per hand-built (x,z), which is what caused the track to
+// float/clip through walls and furniture. Confirmed correct by checking
+// which transform puts the ROOM_POLY notch over the real kitchen
+// cabinets/sink (it's a true 180°, not a mirror) — see NOTES.md.
+//
+// scan-local -> world:  worldX = -scanX + SCAN_TX,  worldZ = -scanZ + SCAN_TZ
+// i.e. scanRoomGroup.scale.set(-1, 1, -1), position = (SCAN_TX, y, SCAN_TZ)
+//
+// SCAN_FLOOR_Y: the scan's own floor sits at roughly y=-0.37 in its local
+// space (it's not a flat plane at y=0 like the hand-built floor — Polycam
+// didn't export the capture levelled to its own floor). Without this
+// offset the track (laid at hand-built floor height, y=0) floats above the
+// real floor. The real floor also isn't perfectly flat (scan warp), so
+// some residual float/sink (roughly ±15cm) remains after a single global
+// offset — a known limitation of a single handheld scan pass.
 const SCAN_TX = 0.79;
 const SCAN_TZ = 4.83;
+const SCAN_FLOOR_Y = -0.37;
 
 const scanRoomGroup = new THREE.Group();
-scanRoomGroup.scale.set(-1, 1, 1);
-scanRoomGroup.position.set(SCAN_TX, 0, -SCAN_TZ);
+scanRoomGroup.scale.set(-1, 1, -1);
+scanRoomGroup.position.set(SCAN_TX, -SCAN_FLOOR_Y, SCAN_TZ);
 scanRoomGroup.visible = false;
 scene.add(scanRoomGroup);
 
