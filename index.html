@@ -1295,10 +1295,16 @@ function placeAt(obj, s, halfLen, track = activeTrack, dir = 1) {
   const front = track.pointAndTangentAtDistance(s + dir * halfLen).point;
   const back = track.pointAndTangentAtDistance(s - dir * halfLen).point;
   const mid = front.clone().add(back).multiplyScalar(0.5);
-  mid.y += 0.025;
+  // Each vehicle's local y=0 is its wheel-bottom/rail-contact point (wheels
+  // are built at y=WHEEL_R — see addWheelPair), so the vertical offset here
+  // should be exactly WHEEL_R to sit the wheels on the railhead. This used
+  // to be a flat 0.025, floating the wheels ~17.5mm clear of the rail —
+  // visible as the whole train parallax-drifting off the track in a close
+  // chase-cam view.
+  mid.y += WHEEL_R;
   obj.position.copy(mid);
   const lookTarget = front.clone();
-  lookTarget.y += 0.025;
+  lookTarget.y += WHEEL_R;
   obj.lookAt(lookTarget);
 }
 
