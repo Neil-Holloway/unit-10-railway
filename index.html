@@ -958,8 +958,8 @@ const TRACK_WAYPOINTS = [
 // consts) so the hall's independent oval can share the exact same, already
 // bug-fixed machinery as the living room's loop.
 const TRACK_SAMPLES = 6000;
-function buildTrackSystem(waypoints) {
-  const centreline = waypoints.map(([x, z]) => new THREE.Vector3(x, TRACK_HEIGHT, z));
+function buildTrackSystem(waypoints, trackHeight = TRACK_HEIGHT) {
+  const centreline = waypoints.map(([x, z]) => new THREE.Vector3(x, trackHeight, z));
   const curve = new THREE.CatmullRomCurve3(centreline, true, 'centripetal', 0.0);
 
   const trackPts = [];
@@ -1056,10 +1056,22 @@ const HALL_TRACK_WAYPOINTS = [
   [-0.2, HALL_CENTRELINE_V - HALL_TURN_RADIUS], // bottom straight midpoint
 ];
 
+// Unlike the hand-built living-room floor (a perfectly flat plane at
+// y=0), the real hall scan's floor is genuinely uneven — a dense raycast
+// sweep along this exact oval found real floor height varying from
+// -0.011 to +0.015m around the single flat HALL_FLOOR_Y offset (worst
+// bump at the west/top, near u=-0.86, v=0.40). At the living-room's
+// default TRACK_HEIGHT (0.003m) the rail/sleeper meshes sat BELOW that
+// bump and were swallowed by the real floor mesh there — visible as a
+// chunk of missing track in bird's-eye view even though the train (which
+// rides its own computed position, not the rendered mesh) still ran the
+// full circuit correctly. Raised well clear of the worst real bump found.
+const HALL_TRACK_HEIGHT = 0.025;
+
 const hallTrackGroup = new THREE.Group();
 hallTrackGroup.visible = false;
 scene.add(hallTrackGroup);
-const hallTrack = buildTrackSystem(HALL_TRACK_WAYPOINTS);
+const hallTrack = buildTrackSystem(HALL_TRACK_WAYPOINTS, HALL_TRACK_HEIGHT);
 buildTrackMeshes(hallTrack, hallTrackGroup);
 
 // The track actually driving the train right now — swapped by the "Hall"
