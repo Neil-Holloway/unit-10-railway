@@ -322,6 +322,159 @@ function loadHallScanIfNeeded() {
   );
 }
 
+// ---------- Real bed2 scan (standalone, not yet connected to the hall) ----------
+// Unlike the hall, this scan is NOT re-oriented with a group rotation —
+// confirmed by direct raycast testing in this file (2026-10-26) that
+// applying a group rotation.y here (mirroring the hall's pattern) either
+// left the floor at its raw, untranslated height or sent the rotated
+// mesh's footprint somewhere that didn't line up with the floor-profiling
+// data at all. The ONLY transform that reproduces the real floor at y=0
+// for every waypoint below is a pure vertical shift (no rotation): the
+// scan keeps its own native x/z orientation, and BED2_ANGLE/BED2_CENTER
+// are used only to convert the floor-profiling work's local (u,v)
+// coordinates into this native (x,z) frame — exactly the same conversion
+// formula already used (and raycast-validated) in scans/test.html, now
+// applied once per waypoint via bed2LocalToRaw() below rather than baked
+// into a group transform. BED2_FLOOR_Y is the dominant real-floor height
+// in that native frame (a PCA pass over the floor point cloud, done in
+// test.html, not in this file).
+//
+// Exhaustive raycast profiling of the real floor (dense (u,v) sampling
+// against this scan, done in scans/test.html) found the room's clear
+// floor is NOT a simple ring around the bed: the bed itself plus corner
+// furniture forms one large obstacle mass running almost the full room
+// (v≈+0.9 down to the back wall), blocking any route that tries to skirt
+// all 3 walls. The only viable closed loop found is a smaller loop
+// confined to the east/right-wall strip, using two parallel inner/outer
+// lanes there and crossing the thin (2.5cm / 3.5cm) points in the
+// obstacle that divides them — validated by dense raycast sampling at
+// only 5 stray hits out of 117 samples, both right at those two
+// deliberately-accepted thin crossings. Per standing instruction, this
+// loop is standalone (own view button below) and is NOT spliced into the
+// hall oval yet.
+const BED2_FLOOR_Y = -1.06;
+const BED2_CENTER = { x: 0.11668496842401259, z: -0.2807902008771124 };
+const BED2_ANGLE = 1.422443340375376;
+function bed2LocalToRaw(u, v) {
+  const cos = Math.cos(BED2_ANGLE), sin = Math.sin(BED2_ANGLE);
+  return [cos * u - sin * v + BED2_CENTER.x, sin * u + cos * v + BED2_CENTER.z];
+}
+// Camera-framing only — covers the whole room (not just the loop), same
+// convention as HALL_BOUND_W/D. The room's own bounding box in this
+// native (unrotated) frame is close to symmetric about the origin
+// (checked via Box3 in the live preview), so the fixed bird's-eye camera
+// (always centred on world origin) still frames it reasonably.
+const BED2_BOUND_W = 4.1;
+const BED2_BOUND_D = 4.9;
+
+const scanBed2Group = new THREE.Group();
+scanBed2Group.position.set(0, -BED2_FLOOR_Y, 0);
+scanBed2Group.visible = false;
+scene.add(scanBed2Group);
+
+let bed2ScanLoaded = false;
+let bed2ScanLoading = false;
+
+function loadBed2ScanIfNeeded() {
+  if (bed2ScanLoaded || bed2ScanLoading) return;
+  bed2ScanLoading = true;
+  scanStatusEl.textContent = 'Loading bed2 scan…';
+  const loader = new GLTFLoader();
+  loader.load(
+    'scans/bed2-scan-v2.glb',
+    (gltf) => {
+      const model = gltf.scene;
+      scanBed2Group.add(model);
+      // Same unlit treatment as the lounge/hall scans.
+      model.traverse((o) => {
+        if (o.isMesh && o.material) {
+          const old = o.material;
+          o.material = new THREE.MeshBasicMaterial({
+            map: old.map || null,
+            vertexColors: old.vertexColors || false,
+            color: old.map ? 0xffffff : (old.color || 0xffffff),
+          });
+        }
+      });
+      bed2ScanLoaded = true;
+      bed2ScanLoading = false;
+      scanStatusEl.textContent = 'Bed2 scan loaded.';
+    },
+    (xhr) => {
+      if (xhr.total) {
+        scanStatusEl.textContent = `Loading bed2 scan… ${(xhr.loaded / xhr.total * 100).toFixed(0)}%`;
+      }
+    },
+    (err) => {
+      bed2ScanLoading = false;
+      scanStatusEl.textContent = 'Failed to load bed2 scan.';
+      console.error(err);
+    }
+  );
+}
+
+// ---------- Real bed1 scan (own standalone frame, part of the hall journey) ----------
+// Same pattern as bed2: no rotation, just a vertical shift so the real
+// floor sits at y=0. BED1_FLOOR_Y found by raycasting a grid straight down
+// over the whole scan and taking the dominant floor-height bin (~-1.34 to
+// -1.40, clustered around -1.35). Kept in its OWN native (x,z) frame —
+// NOT merged into the hall's shared world space — because the hall, bed1
+// and bed2 scans are three independently-captured, unregistered point
+// clouds; forcing them into one shared frame via guessed offsets would
+// make real geometry (walls, furniture) visually overlap in ways that
+// don't reflect the real flat. Instead the "Hall journey" (see that
+// section below) keeps each room as its own self-consistent scene and
+// swaps which one is visible as the train crosses between them — the
+// existing mutually-exclusive room pattern already used by Hall/Bed2,
+// just automated by train position instead of a button click.
+const BED1_FLOOR_Y = -1.35;
+const BED1_BOUND_W = 4.92;
+const BED1_BOUND_D = 5.82;
+const scanBed1Group = new THREE.Group();
+scanBed1Group.position.set(0, -BED1_FLOOR_Y, 0);
+scanBed1Group.visible = false;
+scene.add(scanBed1Group);
+
+let bed1ScanLoaded = false;
+let bed1ScanLoading = false;
+
+function loadBed1ScanIfNeeded() {
+  if (bed1ScanLoaded || bed1ScanLoading) return;
+  bed1ScanLoading = true;
+  scanStatusEl.textContent = 'Loading bed1 scan…';
+  const loader = new GLTFLoader();
+  loader.load(
+    'scans/bed1-scan.glb',
+    (gltf) => {
+      const model = gltf.scene;
+      scanBed1Group.add(model);
+      model.traverse((o) => {
+        if (o.isMesh && o.material) {
+          const old = o.material;
+          o.material = new THREE.MeshBasicMaterial({
+            map: old.map || null,
+            vertexColors: old.vertexColors || false,
+            color: old.map ? 0xffffff : (old.color || 0xffffff),
+          });
+        }
+      });
+      bed1ScanLoaded = true;
+      bed1ScanLoading = false;
+      scanStatusEl.textContent = 'Bed1 scan loaded.';
+    },
+    (xhr) => {
+      if (xhr.total) {
+        scanStatusEl.textContent = `Loading bed1 scan… ${(xhr.loaded / xhr.total * 100).toFixed(0)}%`;
+      }
+    },
+    (err) => {
+      bed1ScanLoading = false;
+      scanStatusEl.textContent = 'Failed to load bed1 scan.';
+      console.error(err);
+    }
+  );
+}
+
 // ---------- Lighting ----------
 scene.add(new THREE.HemisphereLight(0xffffff, 0x55606a, 1.1));
 const sun = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -962,9 +1115,9 @@ const TRACK_WAYPOINTS = [
 // consts) so the hall's independent oval can share the exact same, already
 // bug-fixed machinery as the living room's loop.
 const TRACK_SAMPLES = 6000;
-function buildTrackSystem(waypoints, trackHeight = TRACK_HEIGHT) {
+function buildTrackSystem(waypoints, trackHeight = TRACK_HEIGHT, closed = true) {
   const centreline = waypoints.map(([x, z]) => new THREE.Vector3(x, trackHeight, z));
-  const curve = new THREE.CatmullRomCurve3(centreline, true, 'centripetal', 0.0);
+  const curve = new THREE.CatmullRomCurve3(centreline, closed, 'centripetal', 0.0);
 
   const trackPts = [];
   for (let i = 0; i <= TRACK_SAMPLES; i++) trackPts.push(curve.getPoint(i / TRACK_SAMPLES));
@@ -976,8 +1129,13 @@ function buildTrackSystem(waypoints, trackHeight = TRACK_HEIGHT) {
   // then linearly interpolate position and (from the same two samples)
   // direction of travel — accurate to within a single sample's distance
   // (~trackLength/6000, a few mm), far finer than anything visible.
+  // Closed tracks wrap arc-length modulo trackLength (so a train can run
+  // forever). Open tracks (the bed1/bed2 room-crossing segments — see
+  // "Hall journey" below) instead CLAMP to [0, trackLength]: there's no
+  // meaningful "track" beyond either end, so overshoot just holds at the
+  // end point rather than wrapping to the far end of an unrelated curve.
   function pointAndTangentAtDistance(s) {
-    s = ((s % trackLength) + trackLength) % trackLength;
+    s = closed ? ((s % trackLength) + trackLength) % trackLength : Math.max(0, Math.min(trackLength, s));
     let lo = 0, hi = trackDist.length - 1;
     while (hi - lo > 1) {
       const mid = (lo + hi) >> 1;
@@ -990,7 +1148,7 @@ function buildTrackSystem(waypoints, trackHeight = TRACK_HEIGHT) {
     return { point, tangent };
   }
 
-  return { curve, trackPts, trackDist, trackLength, pointAndTangentAtDistance };
+  return { curve, trackPts, trackDist, trackLength, pointAndTangentAtDistance, closed };
 }
 
 function buildRail(trackSystem, offset) {
@@ -1004,8 +1162,10 @@ function buildRail(trackSystem, offset) {
   }
   // A straight line-segment path through these already-smooth, very
   // closely spaced points (~2.5mm apart) — no further curve-fitting step
-  // that could reintroduce overshoot.
-  return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0), divisions, 0.0015, 6, false);
+  // that could reintroduce overshoot. Closed-ness matches the underlying
+  // track system so open (room-crossing) segments don't get an extra rail
+  // stub looping back from their last point to their first.
+  return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, trackSystem.closed, 'catmullrom', 0), divisions, 0.0015, 6, false);
 }
 
 const railMat = new THREE.MeshStandardMaterial({ color: 0x8a8d90, metalness: 0.6, roughness: 0.4 });
@@ -1072,7 +1232,9 @@ function buildHallOval(radius) {
   ];
 }
 
-const HALL_TRACK_WAYPOINTS = buildHallOval(HALL_TURN_RADIUS);
+// HALL_TRACK_WAYPOINTS_2 (train 2's outer oval) is unaffected by the
+// journey below — it stays a simple, self-contained closed loop that only
+// ever runs inside the hall proper.
 const HALL_TRACK_WAYPOINTS_2 = buildHallOval(HALL_TURN_RADIUS_2);
 
 // Unlike the hand-built living-room floor (a perfectly flat plane at
@@ -1082,11 +1244,55 @@ const HALL_TRACK_WAYPOINTS_2 = buildHallOval(HALL_TURN_RADIUS_2);
 // worst real bump found, same fix as the original single-oval version.
 const HALL_TRACK_HEIGHT = 0.03;
 
+// ---------- Hall journey: hall oval -> bed2 door -> bed1 (through the
+// shared wall) -> bed1 door -> back to the hall oval ----------
+// Replaces the old approach of a fully self-contained standalone bed2
+// loop (see git history) per explicit instruction (2026-10-27): "Change
+// the oval in the hall so it goes through the door (not the cupboard)
+// into bed 2 then turns right and goes through the wall into bed 1 then
+// right again to go out the door and join the oval in the hall, removing
+// the surplus part of the oval."
+//
+// The hall, bed1 and bed2 scans are three independently-captured,
+// unregistered point clouds with no shared coordinate frame — there's no
+// real data to precisely align their doors/walls against each other, and
+// trying to guess a single offset that puts all three into one shared
+// 3D space makes their real geometry visually overlap (a 4-5m room
+// doesn't shrink just because we translate it a metre or two). So rather
+// than one continuous 3D curve through a merged space, this is ONE
+// continuous train JOURNEY made of three separate open (non-looping)
+// track segments, each sitting in its own room's own native frame exactly
+// like the existing standalone hall/bed2 scenes already did — the train
+// completes a segment, then we swap which room's scan+track is visible
+// (reusing the same show/hide pattern as the old manual Hall/Bed2
+// buttons) and reset onto the next segment. Visually this reads as the
+// train vanishing into a doorway/wall and re-appearing on the other side —
+// a tunnel cut, not unlike how real model railways hide a backdrop
+// join behind a tunnel mouth — rather than a continuously-visible crossing.
+//
+// hallMainTrack is the original oval with the top straight's east portion
+// (u=0.6 to the east turn) removed — the "surplus part of the oval" the
+// instruction asked to remove — replaced by the bed1/bed2 detour.
+const HALL_BED2_CUT_U = 0.6; // where the oval is cut to detour into bed2
+const HALL_MAIN_WAYPOINTS = [
+  [HALL_BED2_CUT_U, HALL_CENTRELINE_V + HALL_TURN_RADIUS],
+  [-0.4, HALL_CENTRELINE_V + HALL_TURN_RADIUS], // remaining (west) top straight
+  ...arcPoints(HALL_WEST_TURN_U, HALL_CENTRELINE_V, HALL_TURN_RADIUS, 90, 270, TURN_SEGS),
+  [0, HALL_CENTRELINE_V - HALL_TURN_RADIUS], // bottom straight midpoint
+  ...arcPoints(HALL_EAST_TURN_U, HALL_CENTRELINE_V, HALL_TURN_RADIUS, -90, 90, TURN_SEGS),
+  // ends at (HALL_EAST_TURN_U, +HALL_TURN_RADIUS) — the old oval's east
+  // turn is kept in full; the train "tunnels" into bed1 from there.
+];
+// Backward-compatible name some debug/profiling code still refers to —
+// the hall's own full-oval shape, unaffected by the journey cut, still
+// useful for reference/comparison.
+const HALL_TRACK_WAYPOINTS = HALL_MAIN_WAYPOINTS;
+
 const hallTrackGroup = new THREE.Group();
 hallTrackGroup.visible = false;
 scene.add(hallTrackGroup);
-const hallTrack = buildTrackSystem(HALL_TRACK_WAYPOINTS, HALL_TRACK_HEIGHT);
-buildTrackMeshes(hallTrack, hallTrackGroup);
+const hallMainTrack = buildTrackSystem(HALL_MAIN_WAYPOINTS, HALL_TRACK_HEIGHT, false);
+buildTrackMeshes(hallMainTrack, hallTrackGroup);
 
 const hallTrackGroup2 = new THREE.Group();
 hallTrackGroup2.visible = false;
@@ -1094,14 +1300,90 @@ scene.add(hallTrackGroup2);
 const hallTrack2 = buildTrackSystem(HALL_TRACK_WAYPOINTS_2, HALL_TRACK_HEIGHT);
 buildTrackMeshes(hallTrack2, hallTrackGroup2);
 
+// bed1's own leg of the journey: door (entry from hall) -> wall (exit
+// toward bed2). Found by raycast-profiling scanBed1Group directly in this
+// app (2026-10-27): the real floor is continuous and flat all the way
+// from x=-1.5,z=0.5 through to z=1.9 at the south wall (no void gap found
+// in that sweep — i.e. genuinely open floor reaching through a doorway,
+// not a closed wall), which is taken as bed1's hall-door. The west wall
+// (shared with bed2, by floor-plan position) was found by sweeping x at
+// z=-0.2: real floor ends (hits stop) around x=-1.4, giving a wall-side
+// crossing point just inside that at x=-1.3. Both ends raycast-confirmed
+// as real floor (not void/furniture); the straight line between them was
+// NOT swept, so treat the middle waypoint as a reasonable (not raycast-
+// verified) route past the bed, which sits well clear to the east
+// (x:[0.3,1.3]) per the bedNW/bedSE height samples taken during profiling.
+const BED1_TRACK_WAYPOINTS = [
+  [-1.5, 1.5],  // door (hall side)
+  [-1.0, 0.5],  // via, clear of the bed (bed sits further east)
+  [-1.3, -0.2], // wall (bed2 side)
+];
+const bed1TrackGroup = new THREE.Group();
+bed1TrackGroup.visible = false;
+scene.add(bed1TrackGroup);
+// Raised clear of the real (uneven) scan floor like HALL_TRACK_HEIGHT —
+// NOT the flat-hand-built-floor TRACK_HEIGHT (0.003m), which buried the
+// rail tube under the carpet mesh almost everywhere (invisible from
+// above, confirmed by checking the actual world-space track points
+// against the live scan while debugging this session).
+const bed1Track = buildTrackSystem(BED1_TRACK_WAYPOINTS, HALL_TRACK_HEIGHT, false);
+buildTrackMeshes(bed1Track, bed1TrackGroup);
+
+// ---------- Bed2: journey leg (replaces the old standalone 3-side-skirt
+// loop) ----------
+// Simplified per the same instruction that retired the standalone loop —
+// a direct route from the shared wall (bed1 side) to the hall door,
+// rather than circumnavigating the bed. Both ends reuse the two walkways
+// already raycast-validated in the earlier standalone-loop profiling
+// (2026-10-27, see git history for the full sweep data): the east wall
+// strip (x≈1.5-1.7, reliable floor from the head of the bed to its foot)
+// for the bed1-wall end, and the wide clear area at the head of the bed
+// (z>1.0) leading to the notch at the very top for the hall-door end. The
+// middle waypoints are a direct, NOT individually re-verified line between
+// those two already-validated regions, cutting past the bed's west side.
+const BED2_TRACK_WAYPOINTS = [
+  [1.6, 0.3],  // wall (bed1 side)
+  [1.0, 0.6],  // via
+  [0.4, 1.0],  // via
+  [0.4, 1.7],  // door (hall side)
+];
+const bed2TrackGroup = new THREE.Group();
+bed2TrackGroup.visible = false;
+scene.add(bed2TrackGroup);
+// Same reasoning as bed1Track above — raised clear of the real scan floor.
+const bed2Track = buildTrackSystem(BED2_TRACK_WAYPOINTS, HALL_TRACK_HEIGHT, false);
+buildTrackMeshes(bed2Track, bed2TrackGroup);
+
+// The three legs of the hall journey, in travel order: the hall oval's
+// remaining arc, then bed1 (entered via its hall door, exited via its
+// bed2 wall), then bed2 (entered via its bed1 wall, exited via its hall
+// door) — which rejoins hallMainTrack's start, completing the loop. Each
+// entry's scanGroups/trackGroups are shown exclusively while the train is
+// on that leg; see advanceHallJourney() below.
+const HALL_JOURNEY = [
+  { track: hallMainTrack, scanGroups: [scanHallGroup], trackGroups: [hallTrackGroup], boundW: HALL_BOUND_W, boundD: HALL_BOUND_D, showTrain2: true },
+  { track: bed1Track, scanGroups: [scanBed1Group], trackGroups: [bed1TrackGroup], boundW: BED1_BOUND_W, boundD: BED1_BOUND_D, showTrain2: false },
+  { track: bed2Track, scanGroups: [scanBed2Group], trackGroups: [bed2TrackGroup], boundW: BED2_BOUND_W, boundD: BED2_BOUND_D, showTrain2: false },
+];
+let hallJourneyIdx = 0;
+
 // The track actually driving train 1 right now — swapped by the "Hall"
-// button below. Train meshes themselves are plain scene children (see
-// "Train: tank engine + two coaches" below), not parented to either
-// trackGroup or hallTrackGroup, so the SAME loco/coaches can run on
-// whichever track is active without needing two sets of vehicles. Train 2
-// only ever exists in the hall, so it always runs on hallTrack2 directly
-// (see "Second train" below) rather than through this swap.
+// button below (and automatically advanced between HALL_JOURNEY legs —
+// see advanceHallJourney()). Train meshes themselves are plain scene
+// children (see "Train: tank engine + two coaches" below), not parented
+// to any one room's track group, so the SAME loco/coaches can run on
+// whichever track is active without needing separate vehicle sets. Train
+// 2 only ever exists in the hall leg, so it always runs on hallTrack2
+// directly (see "Second train" below) rather than through this swap.
 let activeTrack = livingRoomTrack;
+// Declared here (rather than down by the "Hall" button below) because
+// updateTrain() reads it, and updateTrain(0) is called during camera setup
+// further down this same script, before the button's own section runs —
+// a `let` declared there would leave it in the temporal dead zone at that
+// first call, throwing a ReferenceError that silently aborted the whole
+// script (no train moving, no UI buttons wired up) the first time this was
+// tried.
+let hallMode = false;
 
 // ---------- Train: tank engine + two coaches ----------
 // Long axis of every vehicle runs along local Z, because Object3D.lookAt()
@@ -1338,6 +1620,9 @@ function updateTrain(dt) {
     trainDist += metresPerSecondFromScaleMph(scaleMph) * dt;
     trainDist2 -= metresPerSecondFromScaleMph(scaleMph2) * dt;
   }
+  if (hallMode && trainDist > activeTrack.trackLength) {
+    advanceHallJourney();
+  }
   placeAt(loco, trainDist, LOCO_HALF_LEN);
   placeAt(coach1, trainDist - COACH1_GAP, COACH_HALF_LEN);
   placeAt(coach2, trainDist - COACH2_GAP, COACH_HALF_LEN);
@@ -1431,7 +1716,7 @@ btnBird.addEventListener('click', () => {
   setActiveButton(btnBird);
 });
 btnScan.addEventListener('click', () => {
-  if (hallMode) return; // living-room-only toggle; irrelevant while the hall is shown
+  if (hallMode) return; // living-room-only toggle; irrelevant while another room is shown
   loadScanIfNeeded();
   const showScan = !scanRoomGroup.visible;
   scanRoomGroup.visible = showScan;
@@ -1441,36 +1726,70 @@ btnScan.addEventListener('click', () => {
   btnScan.textContent = showScan ? 'Hand-built room' : 'Real scan view';
 });
 
+// ---------- Hall journey: shared show/hide helpers ----------
+// Hides every leg's scan+track groups (and train2/hallTrack2, which only
+// ever run during the hall leg) in one go, then showJourneyLeg(idx) shows
+// just the one leg we're moving to. Used both for entering/leaving hallMode
+// and for the automatic leg-to-leg advance below.
+function hideAllJourneyGroups() {
+  HALL_JOURNEY.forEach((leg) => {
+    leg.scanGroups.forEach((g) => { g.visible = false; });
+    leg.trackGroups.forEach((g) => { g.visible = false; });
+  });
+  train2Group.visible = false;
+  hallTrackGroup2.visible = false;
+}
+function showJourneyLeg(idx) {
+  const leg = HALL_JOURNEY[idx];
+  leg.scanGroups.forEach((g) => { g.visible = true; });
+  leg.trackGroups.forEach((g) => { g.visible = true; });
+  activeTrack = leg.track;
+  currentBoundW = leg.boundW;
+  currentBoundD = leg.boundD;
+  train2Group.visible = leg.showTrain2;
+  hallTrackGroup2.visible = leg.showTrain2;
+}
+// Called from updateTrain() once the train overruns the current leg's
+// (open, non-looping) track length — swaps to the next room in
+// HALL_JOURNEY order and resets the loco back to that leg's start. The
+// small positive buffer (rather than resetting to exactly 0) keeps the
+// trailing coaches' distances (trainDist - COACH1_GAP/COACH2_GAP) from
+// going negative for a frame right after the reset.
+function advanceHallJourney() {
+  hallJourneyIdx = (hallJourneyIdx + 1) % HALL_JOURNEY.length;
+  hideAllJourneyGroups();
+  showJourneyLeg(hallJourneyIdx);
+  trainDist = COACH2_GAP + 0.05;
+  updateBirdFrustum();
+}
+
 // ---------- Hall / living-room room switch ----------
 // Mutually exclusive with the living room entirely (room, scan backdrop
 // AND track all swap together) — rather than trying to let the hall's
 // scan/track coexist with the living room's, which the real flat's own
 // doorway would eventually bridge (see NOTES.md "Plan", item 4), this
 // keeps the two rooms as two clean, independently-correct scenes for now.
-let hallMode = false;
+// "Hall" now drives the full hall->bed1->bed2->hall journey (see
+// HALL_JOURNEY above) rather than just the hall's own oval; the old
+// standalone Bed2 button/loop is retired (see git history).
 let preHallShowScan = false; // which living-room sub-view to restore on leaving the hall
 const btnHall = document.getElementById('viewHall');
 btnHall.addEventListener('click', () => {
   hallMode = !hallMode;
   if (hallMode) {
     loadHallScanIfNeeded();
+    loadBed1ScanIfNeeded();
+    loadBed2ScanIfNeeded();
     preHallShowScan = scanRoomGroup.visible;
     scanRoomGroup.visible = false;
     handBuiltRoomGroup.visible = false;
     trackGroup.visible = false;
-    scanHallGroup.visible = true;
-    hallTrackGroup.visible = true;
-    hallTrackGroup2.visible = true;
-    train2Group.visible = true;
-    activeTrack = hallTrack;
-    currentBoundW = HALL_BOUND_W;
-    currentBoundD = HALL_BOUND_D;
+    hallJourneyIdx = 0;
+    hideAllJourneyGroups();
+    showJourneyLeg(hallJourneyIdx);
     scene.background = new THREE.Color(0x202020);
   } else {
-    scanHallGroup.visible = false;
-    hallTrackGroup.visible = false;
-    hallTrackGroup2.visible = false;
-    train2Group.visible = false;
+    hideAllJourneyGroups();
     trackGroup.visible = true;
     scanRoomGroup.visible = preHallShowScan;
     handBuiltRoomGroup.visible = !preHallShowScan;
